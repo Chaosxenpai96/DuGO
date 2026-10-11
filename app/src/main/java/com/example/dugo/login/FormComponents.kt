@@ -36,6 +36,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
@@ -130,6 +132,47 @@ fun FormTextField(
     )
 }
 
+/** 4-20 characters: letters, numbers and underscores only. */
+fun isValidUsername(username: String): Boolean =
+    Regex("^[A-Za-z0-9_]{4,20}$").matches(username)
+
+@Composable
+fun FormPasswordField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    placeholder: String,
+    error: String? = null
+) {
+    var visible by remember { mutableStateOf(false) }
+
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        modifier = Modifier.fillMaxWidth(),
+        placeholder = { Text(placeholder, color = FormPlaceholder, fontSize = 15.sp) },
+        trailingIcon = {
+            Text(
+                text = if (visible) "Hide" else "Show",
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFF8A8FA0),
+                modifier = Modifier
+                    .padding(end = 12.dp)
+                    .clickable { visible = !visible }
+            )
+        },
+        isError = error != null,
+        supportingText = if (error != null) {
+            { Text(error) }
+        } else null,
+        singleLine = true,
+        visualTransformation = if (visible) VisualTransformation.None else PasswordVisualTransformation(),
+        shape = RoundedCornerShape(14.dp),
+        colors = formFieldColors(),
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password)
+    )
+}
+
 @Composable
 fun BloodTypeDropdown(
     selected: String,
@@ -154,7 +197,7 @@ fun BloodTypeDropdown(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Text(
-                    text = if (selected.isEmpty()) "Select blood type" else selected,
+                    text = selected.ifEmpty { "Select blood type" },
                     fontSize = 16.sp,
                     fontWeight = if (selected.isEmpty()) FontWeight.Normal else FontWeight.Bold,
                     color = if (selected.isEmpty()) FormPlaceholder else FormText

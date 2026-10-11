@@ -27,7 +27,9 @@ data class SeekerForm(
     val bloodTypeNeeded: String,
     val location: String,
     val contactNumber: String,
-    val notes: String
+    val notes: String,
+    val username: String,
+    val password: String
 )
 
 @Composable
@@ -40,13 +42,20 @@ fun RegisterSeeker(
     var location by remember { mutableStateOf("") }
     var contact by remember { mutableStateOf("") }
     var notes by remember { mutableStateOf("") }
+    var username by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+    var confirmPassword by remember { mutableStateOf("") }
     var submitted by remember { mutableStateOf(false) }
 
     val nameOk = fullName.isNotBlank()
     val bloodOk = bloodType.isNotEmpty()
     val locationOk = location.isNotBlank()
     val contactOk = isValidPhNumber(contact)
-    val allValid = nameOk && bloodOk && locationOk && contactOk
+    val usernameOk = isValidUsername(username)
+    val passwordOk = password.length >= 8
+    val confirmOk = confirmPassword.isNotEmpty() && confirmPassword == password
+    val allValid = nameOk && bloodOk && locationOk && contactOk &&
+            usernameOk && passwordOk && confirmOk
 
     Column(
         Modifier
@@ -110,6 +119,30 @@ fun RegisterSeeker(
                 minLines = 3
             )
 
+            FormLabel("Username")
+            FormTextField(
+                value = username,
+                onValueChange = { input -> username = input.filter { it.isLetterOrDigit() || it == '_' }.take(20) },
+                placeholder = "e.g. maria_santos",
+                error = if (submitted && !usernameOk) "Use 4-20 letters, numbers or underscores" else null
+            )
+
+            FormLabel("Password")
+            FormPasswordField(
+                value = password,
+                onValueChange = { password = it },
+                placeholder = "At least 8 characters",
+                error = if (submitted && !passwordOk) "Password must be at least 8 characters" else null
+            )
+
+            FormLabel("Confirm Password")
+            FormPasswordField(
+                value = confirmPassword,
+                onValueChange = { confirmPassword = it },
+                placeholder = "Re-enter your password",
+                error = if (submitted && !confirmOk) "Passwords do not match" else null
+            )
+
             Spacer(Modifier.padding(bottom = 16.dp))
         }
 
@@ -125,7 +158,9 @@ fun RegisterSeeker(
                             bloodTypeNeeded = bloodType,
                             location = location.trim(),
                             contactNumber = contact,
-                            notes = notes.trim()
+                            notes = notes.trim(),
+                            username = username.trim(),
+                            password = password
                         )
                     )
                 }

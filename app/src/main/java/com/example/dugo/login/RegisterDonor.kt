@@ -39,7 +39,9 @@ data class DonorForm(
     val location: String,
     val contactNumber: String,
     val availableAnytime: Boolean,
-    val specificDates: String
+    val specificDates: String,
+    val username: String,
+    val password: String
 )
 
 private enum class Availability { Anytime, SpecificDates }
@@ -55,6 +57,9 @@ fun RegisterDonor(
     var contact by remember { mutableStateOf("") }
     var availability by remember { mutableStateOf(Availability.Anytime) }
     var dates by remember { mutableStateOf("") }
+    var username by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+    var confirmPassword by remember { mutableStateOf("") }
     var submitted by remember { mutableStateOf(false) }
 
     val nameOk = fullName.isNotBlank()
@@ -62,7 +67,11 @@ fun RegisterDonor(
     val locationOk = location.isNotBlank()
     val contactOk = isValidPhNumber(contact)
     val datesOk = availability == Availability.Anytime || dates.isNotBlank()
-    val allValid = nameOk && bloodOk && locationOk && contactOk && datesOk
+    val usernameOk = isValidUsername(username)
+    val passwordOk = password.length >= 8
+    val confirmOk = confirmPassword.isNotEmpty() && confirmPassword == password
+    val allValid = nameOk && bloodOk && locationOk && contactOk && datesOk &&
+            usernameOk && passwordOk && confirmOk
 
     Column(
         Modifier
@@ -139,6 +148,30 @@ fun RegisterDonor(
                 )
             }
 
+            FormLabel("Username")
+            FormTextField(
+                value = username,
+                onValueChange = { input -> username = input.filter { it.isLetterOrDigit() || it == '_' }.take(20) },
+                placeholder = "e.g. juan_delacruz",
+                error = if (submitted && !usernameOk) "Use 4-20 letters, numbers or underscores" else null
+            )
+
+            FormLabel("Password")
+            FormPasswordField(
+                value = password,
+                onValueChange = { password = it },
+                placeholder = "At least 8 characters",
+                error = if (submitted && !passwordOk) "Password must be at least 8 characters" else null
+            )
+
+            FormLabel("Confirm Password")
+            FormPasswordField(
+                value = confirmPassword,
+                onValueChange = { confirmPassword = it },
+                placeholder = "Re-enter your password",
+                error = if (submitted && !confirmOk) "Passwords do not match" else null
+            )
+
             Spacer(Modifier.padding(bottom = 16.dp))
         }
 
@@ -155,7 +188,9 @@ fun RegisterDonor(
                             location = location.trim(),
                             contactNumber = contact,
                             availableAnytime = availability == Availability.Anytime,
-                            specificDates = if (availability == Availability.SpecificDates) dates.trim() else ""
+                            specificDates = if (availability == Availability.SpecificDates) dates.trim() else "",
+                            username = username.trim(),
+                            password = password
                         )
                     )
                 }
