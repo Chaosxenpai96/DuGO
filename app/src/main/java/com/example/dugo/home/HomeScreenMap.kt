@@ -1,6 +1,8 @@
 package com.example.dugo.home
 
 import android.Manifest
+import android.annotation.SuppressLint
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
@@ -8,6 +10,7 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.Typeface
+import android.location.LocationManager
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -55,9 +58,12 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
@@ -89,6 +95,7 @@ import com.google.android.gms.maps.model.BitmapDescriptorFactory
 import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
 import com.google.maps.android.compose.CameraPositionState
+import com.google.maps.android.compose.Circle
 import com.google.maps.android.compose.GoogleMap
 import com.google.maps.android.compose.MapProperties
 import com.google.maps.android.compose.MapUiSettings
@@ -97,6 +104,7 @@ import com.google.maps.android.compose.rememberCameraPositionState
 import com.google.maps.android.compose.rememberMarkerState
 import kotlin.math.acos
 import kotlin.math.cos
+import kotlin.math.ln
 import kotlin.math.sin
 import kotlinx.coroutines.launch
 
@@ -117,6 +125,22 @@ enum class HomeTab(val label: String, val icon: ImageVector) {
     Profile("Profile", Icons.Outlined.Person)
 }
 
+/** Most recent location fix the phone already has (GPS or network), or null. Needs location permission. */
+@SuppressLint("MissingPermission")
+private fun lastKnownLocation(context: Context): Pair<Double, Double>? {
+    val lm = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return null
+    return runCatching {
+        lm.getProviders(true)
+            .mapNotNull { lm.getLastKnownLocation(it) }
+            .maxByOrNull { it.time }
+            ?.let { it.latitude to it.longitude }
+    }.getOrNull()
+}
+
+/** Map zoom that keeps a circle of this radius in view (about 14.6 at 1 km down to 10.5 at 20 km). */
+private fun zoomForRadius(radiusKm: Double): Float =
+    (14.6 - ln(radiusKm) / ln(2.0) * 0.95).toFloat()
+
 @Composable
 fun HomeScreenMap(
     roleLabel: String = "Blood Donor",
@@ -136,6 +160,9 @@ fun HomeScreenMap(
     var dismissed by remember { mutableStateOf(setOf<Int>()) }
     var selectedId by remember { mutableStateOf<Int?>(null) }
     var showAll by remember { mutableStateOf(false) }
+    var radiusKm by remember { mutableStateOf(MAX_RADIUS_KM.toFloat()) }
+    // Where distances are measured from: the phone's GPS when it's near Dalaguete, otherwise the town center
+    var origin by remember { mutableStateOf(DALAGUETE_LAT to DALAGUETE_LNG) }
 
     // Map camera starts focused on Dalaguete
     val cameraPositionState = rememberCameraPositionState {
@@ -165,17 +192,28 @@ fun HomeScreenMap(
         )
     }
 
-    val visible = remember(donors, query, bloodFilter, areaFilter, dismissed) {
-        donors
+    // Use the phone's GPS if it's in/near Dalaguete, otherwise fall back to the town center
+    LaunchedEffect(granted) {
+        if (granted) {
+            val gps = lastKnownLocation(context)
+            origin = if (gps != null &&
+                distanceKm(gps.first, gps.second, DALAGUETE_LAT, DALAGUETE_LNG) <= GPS_NEAR_TOWN_KM
+            ) gps else DALAGUETE_LAT to DALAGUETE_LNG
+        }
+    }
+
+    val visible = remember(donors, query, bloodFilter, areaFilter, dismissed, radiusKm, origin) {
+        val type = if (bloodFilter == ALL_TYPES) null else bloodFilter
+        // Already sorted nearest first; the filters below keep that order
+        findNearestDonors(donors, type, origin.first, origin.second, radiusKm.toDouble())
+            .map { it.donor }
             .filter { it.id !in dismissed }
-            .filter { bloodFilter == ALL_TYPES || it.bloodType == bloodFilter }
             .filter { areaFilter == ALL_AREAS || it.area == areaFilter }
             .filter {
                 query.isBlank() ||
                         it.area.contains(query, ignoreCase = true) ||
                         it.name.contains(query, ignoreCase = true)
             }
-            .sortedBy { it.distanceKmFrom(DALAGUETE_LAT, DALAGUETE_LNG) }
     }
     val selected = visible.firstOrNull { it.id == selectedId } ?: visible.firstOrNull()
     val areaName = if (areaFilter == ALL_AREAS) "Dalaguete" else areaFilter
@@ -241,6 +279,75 @@ fun HomeScreenMap(
                 }
             )
 
+            // Distance slider and "Find nearest" button
+            Column {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Distance", color = Ink, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        "Within ${radiusKm.toInt()} km",
+                        color = Brand, fontSize = 13.sp, fontWeight = FontWeight.Bold
+                    )
+                }
+                Slider(
+                    value = radiusKm,
+                    onValueChange = { radiusKm = it; showAll = false },
+                    onValueChangeFinished = {
+                        // Zoom the map so the whole radius is visible
+                        scope.launch {
+                            cameraPositionState.animate(
+                                CameraUpdateFactory.newLatLngZoom(
+                                    LatLng(origin.first, origin.second),
+                                    zoomForRadius(radiusKm.toDouble())
+                                )
+                            )
+                        }
+                    },
+                    valueRange = 1f..MAX_RADIUS_KM.toFloat(),
+                    steps = 18, // 1, 2, 3 ... 20 km
+                    colors = SliderDefaults.colors(
+                        thumbColor = Brand,
+                        activeTrackColor = Brand,
+                        inactiveTrackColor = Line
+                    )
+                )
+            }
+
+            Button(
+                onClick = {
+                    val nearest = visible.firstOrNull()
+                    when {
+                        bloodFilter == ALL_TYPES ->
+                            Toast.makeText(context, "Pick a blood type first", Toast.LENGTH_SHORT).show()
+                        nearest == null ->
+                            Toast.makeText(
+                                context,
+                                "No $bloodFilter donor within ${radiusKm.toInt()} km",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        else -> {
+                            selectedId = nearest.id
+                            showAll = false
+                            scope.launch {
+                                cameraPositionState.animate(
+                                    CameraUpdateFactory.newLatLngZoom(LatLng(nearest.lat, nearest.lng), AREA_ZOOM)
+                                )
+                            }
+                        }
+                    }
+                },
+                modifier = Modifier.fillMaxWidth().height(48.dp),
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEE1D2B), contentColor = Color.White)
+            ) {
+                Icon(Icons.Outlined.Search, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    "Find nearest ${if (bloodFilter == ALL_TYPES) "donor" else "$bloodFilter donor"}",
+                    fontWeight = FontWeight.Bold, fontSize = 14.sp
+                )
+            }
+
             if (!granted) {
                 Row(
                     Modifier
@@ -283,6 +390,9 @@ fun HomeScreenMap(
                 },
                 cameraPositionState = cameraPositionState,
                 myLocationEnabled = granted,
+                originLat = origin.first,
+                originLng = origin.second,
+                radiusKm = radiusKm.toDouble(),
                 modifier = Modifier.fillMaxSize()
             )
 
@@ -331,7 +441,7 @@ fun HomeScreenMap(
                         Column(Modifier.weight(1f)) {
                             Text("Nearby donors", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Ink)
                             Text(
-                                "${visible.size} available in $areaName",
+                                "${visible.size} within ${radiusKm.toInt()} km • $areaName",
                                 fontSize = 12.sp, color = Gray
                             )
                         }
@@ -356,7 +466,7 @@ fun HomeScreenMap(
                         shown.forEach { donor ->
                             DonorCard(
                                 donor = donor,
-                                distanceKm = donor.distanceKmFrom(DALAGUETE_LAT, DALAGUETE_LNG),
+                                distanceKm = distanceKm(origin.first, origin.second, donor.lat, donor.lng),
                                 onDismiss = { dismissed = dismissed + donor.id },
                                 onContact = {
                                     runCatching {
@@ -470,6 +580,9 @@ private fun DonorMap(
     onSelect: (Donor) -> Unit,
     cameraPositionState: CameraPositionState,
     myLocationEnabled: Boolean,
+    originLat: Double,
+    originLng: Double,
+    radiusKm: Double,
     modifier: Modifier = Modifier
 ) {
     val density = LocalDensity.current.density
@@ -487,6 +600,15 @@ private fun DonorMap(
         // Keeps the Google logo and map center clear of the bottom sheet
         contentPadding = PaddingValues(bottom = 220.dp)
     ) {
+        // Search radius around the point distances are measured from
+        Circle(
+            center = LatLng(originLat, originLng),
+            radius = radiusKm * 1000.0,
+            strokeColor = Brand,
+            strokeWidth = 3f,
+            fillColor = Brand.copy(alpha = 0.1f)
+        )
+
         donors.forEach { donor ->
             key(donor.id) {
                 val isSelected = donor.id == selectedId
