@@ -13,13 +13,17 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import com.example.dugo.home.HomeScreenMap
 import com.example.dugo.home.HomeTab
+import com.example.dugo.home.MessagesScreen
+import com.example.dugo.home.ProfileScreen
+import com.example.dugo.home.RequestsScreen
+import com.example.dugo.home.UserSession
 import com.example.dugo.login.LoginScreen
 import com.example.dugo.login.RegisterDonor
 import com.example.dugo.login.RegisterSeeker
 import com.example.dugo.login.RoleSelectScreen
 import com.example.dugo.ui.theme.DuGOTheme
 
-enum class Screen { Login, RoleSelect, RegisterDonor, RegisterSeeker, Home }
+enum class Screen { Login, RoleSelect, RegisterDonor, RegisterSeeker, Home, Requests, Messages, Profile }
 
 // Testing shortcut: only works in debug builds. Remove before releasing the app.
 private const val ADMIN_USER = "admin"
@@ -38,10 +42,12 @@ class MainActivity : ComponentActivity() {
                 var screen by remember { mutableStateOf(Screen.Login) }
                 var roleLabel by remember { mutableStateOf("Blood Donor") }
 
-                // Back button: register -> role select -> login (Login and Home close the app)
+                // Back button: secondary screens go back to Home; register goes back to RoleSelect
+                val secondaryScreens = setOf(Screen.Requests, Screen.Messages, Screen.Profile)
                 BackHandler(enabled = screen != Screen.Login && screen != Screen.Home) {
                     screen = when (screen) {
                         Screen.RegisterDonor, Screen.RegisterSeeker -> Screen.RoleSelect
+                        in secondaryScreens -> Screen.Home
                         else -> Screen.Login
                     }
                 }
@@ -92,15 +98,64 @@ class MainActivity : ComponentActivity() {
 
                     Screen.Home -> HomeScreenMap(
                         roleLabel = roleLabel,
+                        selectedTab = HomeTab.Map,
                         onTabSelected = { tab ->
-                            if (tab != HomeTab.Map) {
-                                Toast.makeText(this, "${tab.label} coming soon", Toast.LENGTH_SHORT).show()
+                            when (tab) {
+                                HomeTab.Map -> { /* already here */ }
+                                HomeTab.Requests -> screen = Screen.Requests
+                                HomeTab.Messages -> screen = Screen.Messages
+                                HomeTab.Profile -> screen = Screen.Profile
                             }
                         },
-                        onNotifications = { Toast.makeText(this, "Notifications coming soon", Toast.LENGTH_SHORT).show() },
-                        onProfile = { Toast.makeText(this, "Profile coming soon", Toast.LENGTH_SHORT).show() },
-                        onMessageDonor = { donor ->
-                            Toast.makeText(this, "Messaging ${donor.name} coming soon", Toast.LENGTH_SHORT).show()
+                        onNotifications = { screen = Screen.Profile },
+                        onProfile = { screen = Screen.Profile },
+                        onMessageDonor = { screen = Screen.Messages }
+                    )
+
+                    Screen.Requests -> RequestsScreen(
+                        roleLabel = roleLabel,
+                        selectedTab = HomeTab.Requests,
+                        onTabSelected = { tab ->
+                            when (tab) {
+                                HomeTab.Map -> screen = Screen.Home
+                                HomeTab.Requests -> { /* already here */ }
+                                HomeTab.Messages -> screen = Screen.Messages
+                                HomeTab.Profile -> screen = Screen.Profile
+                            }
+                        },
+                        onNotifications = { screen = Screen.Profile },
+                        onProfile = { screen = Screen.Profile }
+                    )
+
+                    Screen.Messages -> MessagesScreen(
+                        selectedTab = HomeTab.Messages,
+                        onTabSelected = { tab ->
+                            when (tab) {
+                                HomeTab.Map -> screen = Screen.Home
+                                HomeTab.Requests -> screen = Screen.Requests
+                                HomeTab.Messages -> { /* already here */ }
+                                HomeTab.Profile -> screen = Screen.Profile
+                            }
+                        },
+                        onNotifications = { screen = Screen.Profile },
+                        onProfile = { screen = Screen.Profile }
+                    )
+
+                    Screen.Profile -> ProfileScreen(
+                        roleLabel = roleLabel,
+                        selectedTab = HomeTab.Profile,
+                        onTabSelected = { tab ->
+                            when (tab) {
+                                HomeTab.Map -> screen = Screen.Home
+                                HomeTab.Requests -> screen = Screen.Requests
+                                HomeTab.Messages -> screen = Screen.Messages
+                                HomeTab.Profile -> { /* already here */ }
+                            }
+                        },
+                        onNotifications = { /* already on profile */ },
+                        onLogout = {
+                            screen = Screen.Login
+                            roleLabel = "Blood Donor"
                         }
                     )
                 }
