@@ -23,18 +23,17 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.automirrored.outlined.Logout
-import androidx.compose.material.icons.outlined.Bloodtype
+import androidx.compose.material.icons.automirrored.outlined.ExitToApp
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Favorite
-import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.LocationOn
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Phone
+import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.material.icons.outlined.Shield
+import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -189,7 +188,7 @@ fun ProfileScreen(
             // Info items
             Text("Account Info", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Gray, modifier = Modifier.padding(bottom = 8.dp))
 
-            ProfileInfoRow(icon = Icons.Outlined.Bloodtype, label = "Blood Type", value = profile.bloodType)
+            ProfileInfoRow(icon = Icons.Outlined.Favorite, label = "Blood Type", value = profile.bloodType)
             ProfileInfoRow(icon = Icons.Outlined.LocationOn, label = "Location", value = profile.location)
             ProfileInfoRow(icon = Icons.Outlined.Phone, label = "Contact", value = profile.contactNumber)
 
@@ -199,9 +198,9 @@ fun ProfileScreen(
 
             SettingsRow(icon = Icons.Outlined.Notifications, label = "Notifications", onClick = onNotifications)
             SettingsRow(icon = Icons.Outlined.Settings, label = "App Settings", onClick = { /* TODO */ })
-            SettingsRow(icon = Icons.Outlined.Shield, label = "Privacy & Security", onClick = { /* TODO */ })
+            SettingsRow(icon = Icons.Outlined.Lock, label = "Privacy & Security", onClick = { /* TODO */ })
             SettingsRow(icon = Icons.Outlined.Info, label = "About DuGO", onClick = { /* TODO */ })
-            SettingsRow(icon = Icons.Outlined.History, label = "Donation History", onClick = { /* TODO */ })
+            SettingsRow(icon = Icons.Outlined.Refresh, label = "Donation History", onClick = { /* TODO */ })
 
             Spacer(Modifier.height(20.dp))
 
@@ -217,7 +216,7 @@ fun ProfileScreen(
                     contentColor = BubbleMe
                 )
             ) {
-                Icon(Icons.AutoMirrored.Outlined.Logout, contentDescription = null, modifier = Modifier.size(20.dp))
+                Icon(Icons.AutoMirrored.Outlined.ExitToApp, contentDescription = null, modifier = Modifier.size(20.dp))
                 Spacer(Modifier.width(8.dp))
                 Text("Log Out", fontSize = 15.sp, fontWeight = FontWeight.Bold)
             }
