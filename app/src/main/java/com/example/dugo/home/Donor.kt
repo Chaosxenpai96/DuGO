@@ -36,9 +36,35 @@ val sampleDonors = listOf(
     Donor(5, "Paolo Cruz", "B-", true, "Dumalan", "09201234567", 9.8213, 123.4828)
 )
 
-/** Straight-line distance in km from a point to the donor. */
-fun Donor.distanceKmFrom(lat: Double, lng: Double): Double {
+/** How far from Dalaguete center a GPS fix can be and still be considered "local". */
+const val GPS_NEAR_TOWN_KM = 30.0
+
+/** Straight-line distance in km between two lat/lng points. */
+fun distanceKm(lat1: Double, lng1: Double, lat2: Double, lng2: Double): Double {
     val result = FloatArray(1)
-    Location.distanceBetween(lat, lng, this.lat, this.lng, result)
+    Location.distanceBetween(lat1, lng1, lat2, lng2, result)
     return result[0] / 1000.0
 }
+
+/** Straight-line distance in km from a point to the donor. */
+fun Donor.distanceKmFrom(lat: Double, lng: Double): Double =
+    distanceKm(lat, lng, this.lat, this.lng)
+
+data class NearestResult(val donor: Donor, val distanceKm: Double)
+
+/**
+ * Returns donors sorted by distance from the given origin, optionally filtered
+ * by blood type, within [radiusKm].
+ */
+fun findNearestDonors(
+    donors: List<Donor>,
+    bloodType: String?,
+    originLat: Double,
+    originLng: Double,
+    radiusKm: Double
+): List<NearestResult> =
+    donors
+        .filter { bloodType == null || it.bloodType == bloodType }
+        .map { NearestResult(it, distanceKm(originLat, originLng, it.lat, it.lng)) }
+        .filter { it.distanceKm <= radiusKm }
+        .sortedBy { it.distanceKm }

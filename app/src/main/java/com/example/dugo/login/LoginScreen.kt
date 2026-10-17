@@ -39,6 +39,7 @@ private val TextGray = Color(0xFF8A8FA0)
 fun LoginScreen(
     onLogin: (String, String) -> Unit = { _, _ -> },
     onGoogle: () -> Unit = {},
+    onFacebook: () -> Unit = {},
     onForgotPassword: () -> Unit = {},
     onSignUp: () -> Unit = {}
 ) {
@@ -96,6 +97,8 @@ fun LoginScreen(
             Spacer(Modifier.height(20.dp))
 
             GoogleButton(onGoogle)
+            Spacer(Modifier.height(12.dp))
+            FacebookButton(onFacebook)
 
             Row(Modifier.padding(top = 24.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("Don't have an account?", fontSize = 12.sp, color = TextGray)

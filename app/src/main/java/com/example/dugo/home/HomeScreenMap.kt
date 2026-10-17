@@ -1,6 +1,8 @@
 package com.example.dugo.home
 
 import android.Manifest
+import android.annotation.SuppressLint
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
@@ -8,6 +10,7 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.Typeface
+import android.location.LocationManager
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -61,6 +64,7 @@ import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
@@ -92,6 +96,7 @@ import com.google.android.gms.maps.model.BitmapDescriptorFactory
 import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
 import com.google.maps.android.compose.CameraPositionState
+import com.google.maps.android.compose.Circle
 import com.google.maps.android.compose.GoogleMap
 import com.google.maps.android.compose.MapProperties
 import com.google.maps.android.compose.MapUiSettings
@@ -99,12 +104,10 @@ import com.google.maps.android.compose.Marker
 import com.google.maps.android.compose.rememberCameraPositionState
 import com.google.maps.android.compose.rememberMarkerState
 import kotlin.math.acos
-import kotlin.math.cos
 import kotlin.math.ln
-import kotlin.math.max
-import kotlin.math.min
 import kotlin.math.sin
 import kotlinx.coroutines.launch
+import kotlin.math.cos
 
 private val Ink = Color(0xFF1B2230)
 private val Gray = Color(0xFF8A8F99)
@@ -117,10 +120,18 @@ private const val TOWN_ZOOM = 12f
 private const val AREA_ZOOM = 14f
 private const val MAX_RADIUS_KM = 20
 
-/** Zoom level at which a circle of the given radius fits on a phone-width map. */
-private fun zoomForRadius(radiusKm: Double): Float {
-    val z = ln(23480.0 * cos(Math.toRadians(DALAGUETE_LAT)) / radiusKm) / ln(2.0)
-    return min(16.0, max(8.0, z)).toFloat()
+private fun zoomForRadius(radiusKm: Double): Float =
+    (14.6 - ln(radiusKm) / ln(2.0) * 0.95).toFloat()
+
+@SuppressLint("MissingPermission")
+private fun lastKnownLocation(context: Context): Pair<Double, Double>? {
+    val lm = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return null
+    return runCatching {
+        lm.getProviders(true)
+            .mapNotNull { lm.getLastKnownLocation(it) }
+            .maxByOrNull { it.time }
+            ?.let { it.latitude to it.longitude }
+    }.getOrNull()
 }
 
 enum class HomeTab(val label: String, val icon: ImageVector) {
@@ -181,23 +192,35 @@ fun HomeScreenMap(
         )
     }
 
-    val origin = remember(areaFilter) {
+    var origin by remember { mutableStateOf(DALAGUETE_LAT to DALAGUETE_LNG) }
+
+    // When area filter changes, shift origin to that barangay center
+    LaunchedEffect(areaFilter) {
         val area = DALAGUETE_AREAS.firstOrNull { it.name == areaFilter }
-        if (area != null) area.lat to area.lng else DALAGUETE_LAT to DALAGUETE_LNG
+        if (area != null) origin = area.lat to area.lng
+    }
+
+    // When location permission is granted, use GPS if the device is near Dalaguete
+    LaunchedEffect(granted) {
+        if (granted) {
+            val gps = lastKnownLocation(context)
+            origin = if (gps != null &&
+                distanceKm(gps.first, gps.second, DALAGUETE_LAT, DALAGUETE_LNG) <= GPS_NEAR_TOWN_KM
+            ) gps else DALAGUETE_LAT to DALAGUETE_LNG
+        }
     }
 
     val visible = remember(donors, query, bloodFilter, areaFilter, dismissed, radiusKm, origin) {
-        donors
+        val type = if (bloodFilter == ALL_TYPES) null else bloodFilter
+        findNearestDonors(donors, type, origin.first, origin.second, radiusKm.toDouble())
+            .map { it.donor }
             .filter { it.id !in dismissed }
-            .filter { it.distanceKmFrom(origin.first, origin.second) <= radiusKm }
-            .filter { bloodFilter == ALL_TYPES || it.bloodType == bloodFilter }
             .filter { areaFilter == ALL_AREAS || it.area == areaFilter }
             .filter {
                 query.isBlank() ||
                         it.area.contains(query, ignoreCase = true) ||
                         it.name.contains(query, ignoreCase = true)
             }
-            .sortedBy { it.distanceKmFrom(origin.first, origin.second) }
     }
     val selected = visible.firstOrNull { it.id == selectedId } ?: visible.firstOrNull()
     val areaName = if (areaFilter == ALL_AREAS) "Dalaguete" else areaFilter
@@ -298,6 +321,41 @@ fun HomeScreenMap(
                 )
             )
 
+            Button(
+                onClick = {
+                    val nearest = visible.firstOrNull()
+                    when {
+                        bloodFilter == ALL_TYPES ->
+                            Toast.makeText(context, "Pick a blood type first", Toast.LENGTH_SHORT).show()
+                        nearest == null ->
+                            Toast.makeText(
+                                context,
+                                "No $bloodFilter donor within ${radiusKm.toInt()} km",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        else -> {
+                            selectedId = nearest.id
+                            showAll = false
+                            scope.launch {
+                                cameraPositionState.animate(
+                                    CameraUpdateFactory.newLatLngZoom(LatLng(nearest.lat, nearest.lng), AREA_ZOOM)
+                                )
+                            }
+                        }
+                    }
+                },
+                modifier = Modifier.fillMaxWidth().height(48.dp),
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEE1D2B), contentColor = Color.White)
+            ) {
+                Icon(Icons.Outlined.Search, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    "Find nearest ${if (bloodFilter == ALL_TYPES) "donor" else "$bloodFilter donor"}",
+                    fontWeight = FontWeight.Bold, fontSize = 14.sp
+                )
+            }
+
             if (!granted) {
                 Row(
                     Modifier
@@ -341,6 +399,9 @@ fun HomeScreenMap(
                 },
                 cameraPositionState = cameraPositionState,
                 myLocationEnabled = granted,
+                originLat = origin.first,
+                originLng = origin.second,
+                radiusKm = radiusKm.toDouble(),
                 modifier = Modifier.fillMaxSize()
             )
 
@@ -559,6 +620,9 @@ private fun DonorMap(
     onSelect: (Donor) -> Unit,
     cameraPositionState: CameraPositionState,
     myLocationEnabled: Boolean,
+    originLat: Double,
+    originLng: Double,
+    radiusKm: Double,
     modifier: Modifier = Modifier
 ) {
     val density = LocalDensity.current.density
@@ -576,6 +640,14 @@ private fun DonorMap(
         // Keeps the Google logo and map center clear of the bottom sheet
         contentPadding = PaddingValues(bottom = 220.dp)
     ) {
+        Circle(
+            center = LatLng(originLat, originLng),
+            radius = radiusKm * 1000.0,
+            strokeColor = Brand,
+            strokeWidth = 3f,
+            fillColor = Brand.copy(alpha = 0.1f)
+        )
+
         donors.forEach { donor ->
             key(donor.id) {
                 val isSelected = donor.id == selectedId
