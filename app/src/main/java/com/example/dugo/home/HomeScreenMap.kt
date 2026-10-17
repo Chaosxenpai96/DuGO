@@ -37,6 +37,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.outlined.Call
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.DateRange
@@ -136,6 +137,8 @@ fun HomeScreenMap(
     var dismissed by remember { mutableStateOf(setOf<Int>()) }
     var selectedId by remember { mutableStateOf<Int?>(null) }
     var showAll by remember { mutableStateOf(false) }
+    var filtersMinimized by remember { mutableStateOf(false) }
+    var sheetMinimized by remember { mutableStateOf(false) }
 
     // Map camera starts focused on Dalaguete
     val cameraPositionState = rememberCameraPositionState {
@@ -188,7 +191,14 @@ fun HomeScreenMap(
     ) {
         HomeHeader(roleLabel, onNotifications, onProfile)
 
-        Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        MinimizeRow(
+            title = "Filter & location",
+            minimized = filtersMinimized,
+            onToggle = { filtersMinimized = !filtersMinimized },
+            modifier = Modifier.padding(horizontal = 16.dp)
+        )
+
+        if (!filtersMinimized) Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             OutlinedTextField(
                 value = query,
                 onValueChange = { query = it },
@@ -275,6 +285,7 @@ fun HomeScreenMap(
                 onSelect = { donor ->
                     selectedId = donor.id
                     showAll = false
+                    sheetMinimized = false
                     scope.launch {
                         cameraPositionState.animate(
                             CameraUpdateFactory.newLatLng(LatLng(donor.lat, donor.lng))
@@ -335,17 +346,28 @@ fun HomeScreenMap(
                                 fontSize = 12.sp, color = Gray
                             )
                         }
-                        Text(
-                            if (showAll) "Show less" else "View all",
-                            color = Brand,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.clickable { showAll = !showAll }
+                        if (!sheetMinimized) {
+                            Text(
+                                if (showAll) "Show less" else "View all",
+                                color = Brand,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.clickable { showAll = !showAll }
+                            )
+                            Spacer(Modifier.width(12.dp))
+                        }
+                        Icon(
+                            if (sheetMinimized) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
+                            contentDescription = if (sheetMinimized) "Expand donor info" else "Minimize donor info",
+                            tint = Ink,
+                            modifier = Modifier.size(24.dp).clickable { sheetMinimized = !sheetMinimized }
                         )
                     }
                     Spacer(Modifier.height(14.dp))
 
-                    if (visible.isEmpty()) {
+                    if (sheetMinimized) {
+                        // collapsed: header only
+                    } else if (visible.isEmpty()) {
                         Text(
                             "No donors match your filters.",
                             color = Gray, fontSize = 14.sp,
@@ -378,6 +400,26 @@ fun HomeScreenMap(
 
         HorizontalDivider(color = Line)
         BottomNav(selectedTab, onTabSelected)
+    }
+}
+
+@Composable
+private fun MinimizeRow(
+    title: String,
+    minimized: Boolean,
+    onToggle: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier.fillMaxWidth().clickable(onClick = onToggle).padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(title, Modifier.weight(1f), color = Ink, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+        Icon(
+            if (minimized) Icons.Filled.KeyboardArrowDown else Icons.Filled.KeyboardArrowUp,
+            contentDescription = if (minimized) "Expand filters" else "Minimize filters",
+            tint = Ink
+        )
     }
 }
 
