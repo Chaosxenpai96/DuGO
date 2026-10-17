@@ -37,6 +37,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.outlined.Call
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.DateRange
@@ -55,6 +56,8 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -97,6 +100,9 @@ import com.google.maps.android.compose.rememberCameraPositionState
 import com.google.maps.android.compose.rememberMarkerState
 import kotlin.math.acos
 import kotlin.math.cos
+import kotlin.math.ln
+import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.sin
 import kotlinx.coroutines.launch
 
@@ -109,6 +115,13 @@ private const val ALL_AREAS = "All Dalaguete"
 
 private const val TOWN_ZOOM = 12f
 private const val AREA_ZOOM = 14f
+private const val MAX_RADIUS_KM = 20
+
+/** Zoom level at which a circle of the given radius fits on a phone-width map. */
+private fun zoomForRadius(radiusKm: Double): Float {
+    val z = ln(23480.0 * cos(Math.toRadians(DALAGUETE_LAT)) / radiusKm) / ln(2.0)
+    return min(16.0, max(8.0, z)).toFloat()
+}
 
 enum class HomeTab(val label: String, val icon: ImageVector) {
     Map("Map", Icons.Outlined.Place),
@@ -136,6 +149,9 @@ fun HomeScreenMap(
     var dismissed by remember { mutableStateOf(setOf<Int>()) }
     var selectedId by remember { mutableStateOf<Int?>(null) }
     var showAll by remember { mutableStateOf(false) }
+    var radiusKm by remember { mutableStateOf(MAX_RADIUS_KM.toFloat()) }
+    var filtersMinimized by remember { mutableStateOf(false) }
+    var sheetMinimized by remember { mutableStateOf(false) }
 
     // Map camera starts focused on Dalaguete
     val cameraPositionState = rememberCameraPositionState {
@@ -165,9 +181,15 @@ fun HomeScreenMap(
         )
     }
 
-    val visible = remember(donors, query, bloodFilter, areaFilter, dismissed) {
+    val origin = remember(areaFilter) {
+        val area = DALAGUETE_AREAS.firstOrNull { it.name == areaFilter }
+        if (area != null) area.lat to area.lng else DALAGUETE_LAT to DALAGUETE_LNG
+    }
+
+    val visible = remember(donors, query, bloodFilter, areaFilter, dismissed, radiusKm, origin) {
         donors
             .filter { it.id !in dismissed }
+            .filter { it.distanceKmFrom(origin.first, origin.second) <= radiusKm }
             .filter { bloodFilter == ALL_TYPES || it.bloodType == bloodFilter }
             .filter { areaFilter == ALL_AREAS || it.area == areaFilter }
             .filter {
@@ -175,7 +197,7 @@ fun HomeScreenMap(
                         it.area.contains(query, ignoreCase = true) ||
                         it.name.contains(query, ignoreCase = true)
             }
-            .sortedBy { it.distanceKmFrom(DALAGUETE_LAT, DALAGUETE_LNG) }
+            .sortedBy { it.distanceKmFrom(origin.first, origin.second) }
     }
     val selected = visible.firstOrNull { it.id == selectedId } ?: visible.firstOrNull()
     val areaName = if (areaFilter == ALL_AREAS) "Dalaguete" else areaFilter
@@ -188,7 +210,14 @@ fun HomeScreenMap(
     ) {
         HomeHeader(roleLabel, onNotifications, onProfile)
 
-        Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        MinimizeRow(
+            title = "Filter & location",
+            minimized = filtersMinimized,
+            onToggle = { filtersMinimized = !filtersMinimized },
+            modifier = Modifier.padding(horizontal = 16.dp)
+        )
+
+        if (!filtersMinimized) Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             OutlinedTextField(
                 value = query,
                 onValueChange = { query = it },
@@ -241,6 +270,34 @@ fun HomeScreenMap(
                 }
             )
 
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Radius", color = Ink, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.weight(1f))
+                Text("${radiusKm.toInt()} km", color = Brand, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            }
+            Slider(
+                value = radiusKm,
+                onValueChange = { radiusKm = it; showAll = false },
+                onValueChangeFinished = {
+                    // Zoom the map so the whole radius is visible
+                    scope.launch {
+                        cameraPositionState.animate(
+                            CameraUpdateFactory.newLatLngZoom(
+                                LatLng(origin.first, origin.second),
+                                zoomForRadius(radiusKm.toDouble())
+                            )
+                        )
+                    }
+                },
+                valueRange = 1f..MAX_RADIUS_KM.toFloat(),
+                steps = 18, // 1, 2, 3 ... 20 km
+                colors = SliderDefaults.colors(
+                    thumbColor = Brand,
+                    activeTrackColor = Brand,
+                    inactiveTrackColor = Line
+                )
+            )
+
             if (!granted) {
                 Row(
                     Modifier
@@ -275,6 +332,7 @@ fun HomeScreenMap(
                 onSelect = { donor ->
                     selectedId = donor.id
                     showAll = false
+                    sheetMinimized = false
                     scope.launch {
                         cameraPositionState.animate(
                             CameraUpdateFactory.newLatLng(LatLng(donor.lat, donor.lng))
@@ -335,17 +393,28 @@ fun HomeScreenMap(
                                 fontSize = 12.sp, color = Gray
                             )
                         }
-                        Text(
-                            if (showAll) "Show less" else "View all",
-                            color = Brand,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.clickable { showAll = !showAll }
+                        if (!sheetMinimized) {
+                            Text(
+                                if (showAll) "Show less" else "View all",
+                                color = Brand,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.clickable { showAll = !showAll }
+                            )
+                            Spacer(Modifier.width(12.dp))
+                        }
+                        Icon(
+                            if (sheetMinimized) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
+                            contentDescription = if (sheetMinimized) "Expand donor info" else "Minimize donor info",
+                            tint = Ink,
+                            modifier = Modifier.size(24.dp).clickable { sheetMinimized = !sheetMinimized }
                         )
                     }
                     Spacer(Modifier.height(14.dp))
 
-                    if (visible.isEmpty()) {
+                    if (sheetMinimized) {
+                        // collapsed: header only
+                    } else if (visible.isEmpty()) {
                         Text(
                             "No donors match your filters.",
                             color = Gray, fontSize = 14.sp,
@@ -356,7 +425,7 @@ fun HomeScreenMap(
                         shown.forEach { donor ->
                             DonorCard(
                                 donor = donor,
-                                distanceKm = donor.distanceKmFrom(DALAGUETE_LAT, DALAGUETE_LNG),
+                                distanceKm = donor.distanceKmFrom(origin.first, origin.second),
                                 onDismiss = { dismissed = dismissed + donor.id },
                                 onContact = {
                                     runCatching {
@@ -378,6 +447,26 @@ fun HomeScreenMap(
 
         HorizontalDivider(color = Line)
         BottomNav(selectedTab, onTabSelected)
+    }
+}
+
+@Composable
+private fun MinimizeRow(
+    title: String,
+    minimized: Boolean,
+    onToggle: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier.fillMaxWidth().clickable(onClick = onToggle).padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(title, Modifier.weight(1f), color = Ink, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+        Icon(
+            if (minimized) Icons.Filled.KeyboardArrowDown else Icons.Filled.KeyboardArrowUp,
+            contentDescription = if (minimized) "Expand filters" else "Minimize filters",
+            tint = Ink
+        )
     }
 }
 
