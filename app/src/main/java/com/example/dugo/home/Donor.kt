@@ -36,9 +36,6 @@ val sampleDonors = listOf(
     Donor(5, "Paolo Cruz", "B-", true, "Dumalan", "09201234567", 9.8213, 123.4828)
 )
 
-/** How far from Dalaguete center a GPS fix can be and still be considered "local". */
-const val GPS_NEAR_TOWN_KM = 30.0
-
 /** Straight-line distance in km between two lat/lng points. */
 fun distanceKm(lat1: Double, lng1: Double, lat2: Double, lng2: Double): Double {
     val result = FloatArray(1)
