@@ -473,6 +473,8 @@ fun PrivacySecurityScreen(onBack: () -> Unit) {
                 TextButton(
                     onClick = {
                         AppSettings.clear(context)
+                        // Keep an explicit empty history so sample records are not re-seeded
+                        saveDonations(AppSettings.prefs(context), emptyList())
                         UserSession.profile = UserSession.profile.copy(totalDonations = 0)
                         showClearDialog = false
                         Toast.makeText(context, "Local data cleared", Toast.LENGTH_SHORT).show()
