@@ -160,7 +160,11 @@ fun HomeScreenMap(
     var dismissed by remember { mutableStateOf(setOf<Int>()) }
     var selectedId by remember { mutableStateOf<Int?>(null) }
     var showAll by remember { mutableStateOf(false) }
-    var radiusKm by remember { mutableStateOf(MAX_RADIUS_KM.toFloat()) }
+    var radiusKm by remember {
+        val saved = AppSettings.prefs(context)
+            .getFloat(AppSettings.DEFAULT_RADIUS_KM, MAX_RADIUS_KM.toFloat())
+        mutableStateOf(saved.coerceIn(1f, MAX_RADIUS_KM.toFloat()))
+    }
     var filtersMinimized by remember { mutableStateOf(false) }
     var sheetMinimized by remember { mutableStateOf(false) }
 
