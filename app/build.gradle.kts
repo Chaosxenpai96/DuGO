@@ -69,6 +69,7 @@ dependencies {
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
     implementation(libs.maps.compose)
+    implementation(libs.play.services.location)
 
     // Firebase (all versions pinned by the BoM)
     implementation(platform(libs.firebase.bom))

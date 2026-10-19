@@ -90,11 +90,15 @@ import androidx.core.net.toUri
 import com.example.dugo.R
 import com.example.dugo.login.BLOOD_TYPES
 import com.example.dugo.login.Brand
+import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.Priority
 import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.model.BitmapDescriptor
 import com.google.android.gms.maps.model.BitmapDescriptorFactory
 import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
+import com.google.android.gms.tasks.CancellationTokenSource
+import com.google.android.gms.tasks.Tasks
 import com.google.maps.android.compose.CameraPositionState
 import com.google.maps.android.compose.Circle
 import com.google.maps.android.compose.GoogleMap
@@ -106,7 +110,9 @@ import com.google.maps.android.compose.rememberMarkerState
 import kotlin.math.acos
 import kotlin.math.ln
 import kotlin.math.sin
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.math.cos
 
 private val Ink = Color(0xFF1B2230)
@@ -114,7 +120,7 @@ private val Gray = Color(0xFF8A8F99)
 private val Line = Color(0xFFE7E9EE)
 private val Green = Color(0xFF2E9E6B)
 private const val ALL_TYPES = "All blood types"
-private const val ALL_AREAS = "All Dalaguete"
+private const val ALL_AREAS = "All areas"
 
 private const val TOWN_ZOOM = 12f
 private const val AREA_ZOOM = 14f
@@ -133,6 +139,17 @@ private fun lastKnownLocation(context: Context): Pair<Double, Double>? {
             ?.let { it.latitude to it.longitude }
     }.getOrNull()
 }
+
+/** Requests a fresh GPS fix, falling back to the last known location. */
+@SuppressLint("MissingPermission")
+private suspend fun currentLocation(context: Context): Pair<Double, Double>? =
+    withContext(Dispatchers.IO) {
+        runCatching {
+            val client = LocationServices.getFusedLocationProviderClient(context)
+            val token = CancellationTokenSource()
+            Tasks.await(client.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, token.token))
+        }.getOrNull()?.let { it.latitude to it.longitude } ?: lastKnownLocation(context)
+    }
 
 enum class HomeTab(val label: String, val icon: ImageVector) {
     Map("Map", Icons.Outlined.Place),
@@ -167,6 +184,7 @@ fun HomeScreenMap(
     }
     var filtersMinimized by remember { mutableStateOf(false) }
     var sheetMinimized by remember { mutableStateOf(false) }
+    var usingMyLocation by remember { mutableStateOf(false) }
 
     // Map camera starts focused on Dalaguete
     val cameraPositionState = rememberCameraPositionState {
@@ -198,19 +216,49 @@ fun HomeScreenMap(
 
     var origin by remember { mutableStateOf(DALAGUETE_LAT to DALAGUETE_LNG) }
 
+    // Ask for location permission the first time the map opens
+    LaunchedEffect(Unit) {
+        if (!granted) askLocation()
+    }
+
     // When area filter changes, shift origin to that barangay center
     LaunchedEffect(areaFilter) {
         val area = DALAGUETE_AREAS.firstOrNull { it.name == areaFilter }
-        if (area != null) origin = area.lat to area.lng
+        if (area != null) {
+            origin = area.lat to area.lng
+            usingMyLocation = false
+        }
     }
 
-    // When location permission is granted, use GPS if the device is near Dalaguete
+    // Center the map on the user's current location once permission is granted
     LaunchedEffect(granted) {
         if (granted) {
-            val gps = lastKnownLocation(context)
-            origin = if (gps != null &&
-                distanceKm(gps.first, gps.second, DALAGUETE_LAT, DALAGUETE_LNG) <= GPS_NEAR_TOWN_KM
-            ) gps else DALAGUETE_LAT to DALAGUETE_LNG
+            val gps = currentLocation(context) ?: return@LaunchedEffect
+            origin = gps
+            usingMyLocation = true
+            cameraPositionState.animate(
+                CameraUpdateFactory.newLatLngZoom(LatLng(gps.first, gps.second), TOWN_ZOOM)
+            )
+        }
+    }
+
+    // "Use my location" button: fetch a fresh fix and fly the camera there
+    val focusMyLocation: () -> Unit = {
+        if (!granted) {
+            askLocation()
+        } else {
+            scope.launch {
+                val gps = currentLocation(context)
+                if (gps != null) {
+                    origin = gps
+                    usingMyLocation = true
+                    cameraPositionState.animate(
+                        CameraUpdateFactory.newLatLngZoom(LatLng(gps.first, gps.second), TOWN_ZOOM)
+                    )
+                } else {
+                    Toast.makeText(context, "Couldn't get your location", Toast.LENGTH_SHORT).show()
+                }
+            }
         }
     }
 
@@ -227,7 +275,11 @@ fun HomeScreenMap(
             }
     }
     val selected = visible.firstOrNull { it.id == selectedId } ?: visible.firstOrNull()
-    val areaName = if (areaFilter == ALL_AREAS) "Dalaguete" else areaFilter
+    val areaName = when {
+        areaFilter != ALL_AREAS -> areaFilter
+        usingMyLocation -> "your area"
+        else -> "Dalaguete"
+    }
 
     Column(
         Modifier
@@ -235,7 +287,7 @@ fun HomeScreenMap(
             .background(Color.White)
             .statusBarsPadding()
     ) {
-        HomeHeader(roleLabel, onNotifications, onProfile)
+        HomeHeader(roleLabel, usingMyLocation, onNotifications, onProfile)
 
         MinimizeRow(
             title = "Filter & location",
@@ -251,7 +303,7 @@ fun HomeScreenMap(
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
                 shape = RoundedCornerShape(16.dp),
-                placeholder = { Text("Search location in Dalaguete", color = Gray, fontSize = 14.sp) },
+                placeholder = { Text("Search area or donor name", color = Gray, fontSize = 14.sp) },
                 leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null, tint = Gray) },
                 trailingIcon = {
                     Box(
@@ -260,7 +312,7 @@ fun HomeScreenMap(
                             .size(36.dp)
                             .clip(RoundedCornerShape(10.dp))
                             .background(Color.White)
-                            .clickable { askLocation() },
+                            .clickable { focusMyLocation() },
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(Icons.Outlined.LocationOn, contentDescription = "Use my location", tint = Brand)
@@ -536,7 +588,12 @@ private fun MinimizeRow(
 }
 
 @Composable
-private fun HomeHeader(roleLabel: String, onNotifications: () -> Unit, onProfile: () -> Unit) {
+private fun HomeHeader(
+    roleLabel: String,
+    usingMyLocation: Boolean,
+    onNotifications: () -> Unit,
+    onProfile: () -> Unit
+) {
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -550,7 +607,7 @@ private fun HomeHeader(roleLabel: String, onNotifications: () -> Unit, onProfile
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(roleLabel, color = Brand, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-            Text("Dalaguete, Cebu", color = Gray, fontSize = 12.sp)
+            Text(if (usingMyLocation) "Near your location" else "Dalaguete, Cebu", color = Gray, fontSize = 12.sp)
         }
         Box(
             Modifier.size(40.dp).clip(CircleShape).background(Color(0xFFF3F4F6)).clickable(onClick = onNotifications),
