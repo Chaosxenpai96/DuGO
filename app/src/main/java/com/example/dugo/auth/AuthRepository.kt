@@ -184,7 +184,8 @@ object AuthRepository {
             fullName = fullName
                 ?: user.displayName?.takeIf { it.isNotBlank() }
                 ?: existing.fullName,
-            username = (user.email ?: user.uid).takeIf { it.isNotBlank() } ?: existing.username,
+            username = (user.email ?: user.displayName ?: user.uid)
+                .takeIf { it.isNotBlank() } ?: existing.username,
             bloodType = existing.bloodType,
             location = existing.location,
             contactNumber = user.phoneNumber ?: existing.contactNumber,

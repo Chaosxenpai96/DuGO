@@ -71,8 +71,12 @@ object FacebookAuthCallback {
             )
             return
         }
+        // Only public_profile is requested: it is always granted. Asking for
+        // "email" before the app has that permission approved makes Facebook
+        // show an "Invalid Scopes" warning and returns no address anyway. Add
+        // "email" back here once it is approved in the Meta dashboard.
         LoginManager.getInstance()
-            .logInWithReadPermissions(activity, listOf("email", "public_profile"))
+            .logInWithReadPermissions(activity, listOf("public_profile"))
     }
 
     /** The current access token, if the user is still signed in to Facebook. */
