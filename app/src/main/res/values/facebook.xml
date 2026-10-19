@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      Facebook Login credentials from the Meta for Developers dashboard.
+      Replace these with your real App ID / Client Token.
+      App Settings -> Basic in https://developers.facebook.com/apps/
+    -->
+    <string name="facebook_app_id" translatable="false">REPLACE_WITH_FACEBOOK_APP_ID</string>
+    <string name="facebook_client_token" translatable="false">REPLACE_WITH_FACEBOOK_CLIENT_TOKEN</string>
+</resources>

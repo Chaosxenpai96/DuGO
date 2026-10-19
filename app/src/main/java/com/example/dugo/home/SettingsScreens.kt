@@ -4,6 +4,8 @@ import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -277,12 +279,51 @@ fun NotificationsSettingsScreen(onBack: () -> Unit) {
     var urgent by remember { mutableStateOf(prefs.getBoolean(AppSettings.NOTIF_URGENT, true)) }
     var messages by remember { mutableStateOf(prefs.getBoolean(AppSettings.NOTIF_MESSAGES, true)) }
     var reminders by remember { mutableStateOf(prefs.getBoolean(AppSettings.NOTIF_REMINDERS, false)) }
+    var hasPermission by remember {
+        mutableStateOf(com.example.dugo.auth.NotificationManager.hasPermission(context))
+    }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        hasPermission = granted
+        if (granted) {
+            com.example.dugo.auth.NotificationManager.syncTopics(context)
+        }
+    }
 
     fun save(key: String, value: Boolean) {
         prefs.edit().putBoolean(key, value).apply()
+        // Keep the Firebase topic subscriptions in step with the preference
+        com.example.dugo.auth.NotificationManager.syncTopics(context)
     }
 
     SettingsScaffold("Notifications", onBack) {
+        if (!hasPermission) {
+            // Android 13+ needs the runtime permission before any alert can show
+            OutlinedButton(
+                onClick = {
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                        permissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                    } else {
+                        val intent = Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                            .putExtra(
+                                android.provider.Settings.EXTRA_APP_PACKAGE,
+                                context.packageName
+                            )
+                        runCatching { context.startActivity(intent) }
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Icon(Icons.Outlined.Notifications, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Allow notifications on this device")
+            }
+            Spacer(Modifier.height(10.dp))
+        }
+
         InfoText("Choose which alerts DuGO may send you.")
         Spacer(Modifier.height(8.dp))
 
