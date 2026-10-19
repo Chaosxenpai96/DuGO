@@ -12,7 +12,11 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -30,8 +34,10 @@ import androidx.credentials.exceptions.GetCredentialException
 import androidx.credentials.exceptions.GetCredentialProviderConfigurationException
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
-import kotlinx.coroutines.CancellableContinuation
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeout
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
@@ -52,6 +58,8 @@ fun GoogleSignInButton(
     val context = LocalContext.current
     val credentialManager = remember { CredentialManager.create(context) }
     val serverClientId = remember { googleWebClientId(context) }
+    val scope = rememberCoroutineScope()
+    var isConnecting by remember { mutableStateOf(false) }
 
     OutlinedButton(
         onClick = {
@@ -65,31 +73,56 @@ fun GoogleSignInButton(
                 .setCredentialOptions(listOf(option))
                 .build()
 
-            credentialManager.getCredentialAsync(
-                context,
-                request,
-                CancellationSignal(),
-                ContextCompat.getMainExecutor(context),
-                object : CredentialManagerCallback<GetCredentialResponse, GetCredentialException> {
-                    override fun onResult(result: GetCredentialResponse) {
-                        val token = runCatching {
-                            GoogleIdTokenCredential.createFrom(result.credential.data).idToken
-                        }.getOrNull()
+            isConnecting = true
+            scope.launch {
+                val signal = CancellationSignal()
+                try {
+                    // Credential Manager does not always call back (for example when
+                    // Google Play services is missing an account or module), so the
+                    // wait is bounded to avoid leaving the button stuck.
+                    val response = withTimeout(20_000) {
+                        suspendCancellableCoroutine<GetCredentialResponse> { continuation ->
+                            credentialManager.getCredentialAsync(
+                                context,
+                                request,
+                                signal,
+                                ContextCompat.getMainExecutor(context),
+                                object : CredentialManagerCallback<GetCredentialResponse, GetCredentialException> {
+                                    override fun onResult(result: GetCredentialResponse) {
+                                        if (continuation.isActive) continuation.resume(result)
+                                    }
 
-                        if (token != null) {
-                            onGoogleIdToken(token)
-                        } else {
-                            onError("Couldn't read the Google sign-in token. Please try again.")
+                                    override fun onError(e: GetCredentialException) {
+                                        if (continuation.isActive) continuation.resumeWithException(e)
+                                    }
+                                }
+                            )
+                            continuation.invokeOnCancellation { signal.cancel() }
                         }
                     }
 
-                    override fun onError(e: GetCredentialException) {
-                        onError(googleErrorMessage(e))
+                    val token = runCatching {
+                        GoogleIdTokenCredential.createFrom(response.credential.data).idToken
+                    }.getOrNull()
+
+                    if (token != null) {
+                        onGoogleIdToken(token)
+                    } else {
+                        onError("Couldn't read the Google sign-in token. Please try again.")
                     }
+                } catch (e: TimeoutCancellationException) {
+                    onError(
+                        "Google sign-in took too long. Make sure a Google account is " +
+                            "added on this device, then try again."
+                    )
+                } catch (e: GetCredentialException) {
+                    onError(googleErrorMessage(e))
+                } finally {
+                    isConnecting = false
                 }
-            )
+            }
         },
-        enabled = enabled,
+        enabled = enabled && !isConnecting,
         modifier = modifier.height(52.dp),
         shape = RoundedCornerShape(26.dp),
         border = BorderStroke(1.dp, Color(0xFFD5D8DE)),
@@ -101,18 +134,27 @@ fun GoogleSignInButton(
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("G", color = Color(0xFF4285F4), fontSize = 16.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.width(10.dp))
-            Text("Continue with Google", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            Text(
+                if (isConnecting) "Connecting…" else "Continue with Google",
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold
+            )
         }
     }
 }
 
 /** Turns a Credential Manager failure into something worth showing the user. */
-private fun googleErrorMessage(e: Exception): String = when (e) {
-    is GetCredentialCancellationException -> "Google sign-in was cancelled."
-    is GetCredentialProviderConfigurationException ->
-        "Google sign-in isn't set up yet. Check the Firebase configuration."
-    is GetCredentialException -> e.message ?: "Google sign-in failed. Please try again."
-    else -> "Google sign-in failed. Please try again."
+private fun googleErrorMessage(e: Exception): String {
+    val raw = e.message.orEmpty()
+    return when {
+        e is GetCredentialCancellationException -> "Google sign-in was cancelled."
+        e is GetCredentialProviderConfigurationException ->
+            "Google sign-in isn't set up yet. Check the Firebase configuration."
+        raw.contains("no credentials available", ignoreCase = true) ->
+            "No Google account found on this device. Add one in Settings, then try again."
+        e is GetCredentialException -> raw.ifBlank { "Google sign-in failed. Please try again." }
+        else -> "Google sign-in failed. Please try again."
+    }
 }
 
 /**

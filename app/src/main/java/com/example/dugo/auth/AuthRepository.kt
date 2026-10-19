@@ -125,6 +125,20 @@ object AuthRepository {
         AuthResult.Failure(friendlyMessage(e))
     }
 
+    /**
+     * True when a real App ID has been put in `res/values/facebook.xml`. The
+     * bundled placeholder would otherwise send the login flow to a non-existent
+     * Facebook app with no explanation.
+     */
+    fun isFacebookConfigured(context: Context): Boolean {
+        val id = context.resources.getIdentifier(
+            "facebook_app_id", "string", context.packageName
+        )
+        if (id == 0) return false
+        val value = context.getString(id)
+        return value.isNotBlank() && !value.startsWith("REPLACE_WITH")
+    }
+
     /** Starts the Facebook login flow. */
     fun startFacebookLogin(activity: android.app.Activity) {
         FacebookAuthCallback.startLogin(activity)
@@ -206,7 +220,8 @@ object AuthRepository {
             raw.contains("email address is already in use", ignoreCase = true) ->
                 "That email is already registered. Try signing in instead."
             raw.contains("password is invalid", ignoreCase = true) ||
-                raw.contains("wrong password", ignoreCase = true) ->
+                raw.contains("wrong password", ignoreCase = true) ||
+                raw.contains("supplied auth credential", ignoreCase = true) ->
                 "Incorrect email or password."
             raw.contains("no user record", ignoreCase = true) ||
                 raw.contains("user not found", ignoreCase = true) ->

@@ -152,7 +152,13 @@ class MainActivity : ComponentActivity() {
                         onGoogle = { Toast.makeText(this, "Google sign-in", Toast.LENGTH_SHORT).show() },
                         onFacebook = {
                             authError = null
-                            AuthRepository.startFacebookLogin(this)
+                            if (AuthRepository.isFacebookConfigured(this)) {
+                                AuthRepository.startFacebookLogin(this)
+                            } else {
+                                authError =
+                                    "Facebook login isn't configured yet. Add your App ID " +
+                                        "and Client Token to res/values/facebook.xml."
+                            }
                         },
                         onForgotPassword = { Toast.makeText(this, "Forgot password", Toast.LENGTH_SHORT).show() },
                         onSignUp = { screen = Screen.RoleSelect }
