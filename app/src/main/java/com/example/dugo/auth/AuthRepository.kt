@@ -125,19 +125,9 @@ object AuthRepository {
         AuthResult.Failure(friendlyMessage(e))
     }
 
-    /**
-     * True when a real App ID has been put in `res/values/facebook.xml`. The
-     * bundled placeholder would otherwise send the login flow to a non-existent
-     * Facebook app with no explanation.
-     */
-    fun isFacebookConfigured(context: Context): Boolean {
-        val id = context.resources.getIdentifier(
-            "facebook_app_id", "string", context.packageName
-        )
-        if (id == 0) return false
-        val value = context.getString(id)
-        return value.isNotBlank() && !value.startsWith("REPLACE_WITH")
-    }
+    // -----------------------------------------------------------------------
+    // Facebook
+    // -----------------------------------------------------------------------
 
     /** Starts the Facebook login flow. */
     fun startFacebookLogin(activity: android.app.Activity) {
@@ -147,17 +137,37 @@ object AuthRepository {
     fun facebookAccessToken(): String? = FacebookAuthCallback.currentAccessToken()
 
     /**
-     * The Facebook SDK initialises itself through a ContentProvider, so this only
-     * needs to confirm the App ID is present in the manifest resources.
+     * Initialises the Facebook SDK when both the App ID and Client Token are
+     * present. SDK 19 refuses to initialise without a client token, so a missing
+     * value leaves the SDK off instead of throwing.
      */
     fun initializeFacebook(context: Context) {
-        val appId = context.resources.getIdentifier(
-            "facebook_app_id", "string", context.packageName
-        )
-        if (appId != 0) {
-            com.facebook.FacebookSdk.setApplicationId(context.getString(appId))
-        }
+        val appId = stringResource(context, "facebook_app_id")
+        val clientToken = stringResource(context, "facebook_client_token")
+        if (!isRealValue(appId) || !isRealValue(clientToken)) return
+
+        runCatching {
+            com.facebook.FacebookSdk.setApplicationId(appId)
+            com.facebook.FacebookSdk.setClientToken(clientToken)
+            com.facebook.FacebookSdk.sdkInitialize(context)
+        }.onFailure { Log.w(TAG, "Facebook SDK could not initialise", it) }
     }
+
+    private fun stringResource(context: Context, name: String): String {
+        val id = context.resources.getIdentifier(name, "string", context.packageName)
+        return if (id != 0) context.getString(id) else ""
+    }
+
+    private fun isRealValue(value: String): Boolean =
+        value.isNotBlank() && !value.startsWith("REPLACE_WITH")
+
+    /**
+     * True when both Facebook credentials are filled in. A missing client token
+     * means the SDK cannot initialise, so the login button should say so.
+     */
+    fun isFacebookConfigured(context: Context): Boolean =
+        isRealValue(stringResource(context, "facebook_app_id")) &&
+            isRealValue(stringResource(context, "facebook_client_token"))
 
     // -----------------------------------------------------------------------
     // Session

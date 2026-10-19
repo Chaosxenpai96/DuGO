@@ -2,9 +2,12 @@
 <resources>
     <!--
       Facebook Login credentials from the Meta for Developers dashboard.
-      Replace these with your real App ID / Client Token.
       App Settings -> Basic in https://developers.facebook.com/apps/
+
+      The client token is the value on the "Client token" row (Show button),
+      not the OAuth redirect URI. Leave it empty until it is available; the
+      Facebook SDK treats an empty value as "not set".
     -->
-    <string name="facebook_app_id" translatable="false">REPLACE_WITH_FACEBOOK_APP_ID</string>
-    <string name="facebook_client_token" translatable="false">REPLACE_WITH_FACEBOOK_CLIENT_TOKEN</string>
+    <string name="facebook_app_id" translatable="false">1105420259022473</string>
+    <string name="facebook_client_token" translatable="false"></string>
 </resources>

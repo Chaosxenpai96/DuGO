@@ -27,6 +27,10 @@ object FacebookAuthCallback {
         this.onToken = onToken
         this.onFailure = onFailure
 
+        // The SDK is only initialised once both the App ID and client token are
+        // configured. Touching LoginManager before that throws, so skip it.
+        if (!FacebookSdk.isInitialized()) return
+
         val manager = callbackManager ?: CallbackManager.Factory.create().also {
             callbackManager = it
         }
@@ -60,12 +64,21 @@ object FacebookAuthCallback {
 
     /** Starts the Facebook login flow. */
     fun startLogin(activity: android.app.Activity) {
+        if (!FacebookSdk.isInitialized()) {
+            onFailure?.invoke(
+                "Facebook login isn't configured yet. Add your App ID and Client " +
+                    "Token to res/values/facebook.xml."
+            )
+            return
+        }
         LoginManager.getInstance()
             .logInWithReadPermissions(activity, listOf("email", "public_profile"))
     }
 
     /** The current access token, if the user is still signed in to Facebook. */
-    fun currentAccessToken(): String? = AccessToken.getCurrentAccessToken()?.token
+    fun currentAccessToken(): String? = runCatching {
+        if (FacebookSdk.isInitialized()) AccessToken.getCurrentAccessToken()?.token else null
+    }.getOrNull()
 
     /** Forwards the Facebook login result to the SDK. Call from onActivityResult. */
     fun onActivityResult(requestCode: Int, resultCode: Int, data: android.content.Intent?): Boolean =
