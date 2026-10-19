@@ -8,6 +8,6 @@
       not the OAuth redirect URI. Leave it empty until it is available; the
       Facebook SDK treats an empty value as "not set".
     -->
-    <string name="facebook_app_id" translatable="false">1105420259022473</string>
-    <string name="facebook_client_token" translatable="false">77c2fbbf137dda7db1f6b6d89d95d6c9</string>
+    <string name="facebook_app_id" translatable="false">1043785078679381</string>
+    <string name="facebook_client_token" translatable="false">5bbef0b53c0bcc12d4bce5d5b182ce41</string>
 </resources>
