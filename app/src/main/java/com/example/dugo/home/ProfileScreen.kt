@@ -1,5 +1,6 @@
 package com.example.dugo.home
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -49,6 +50,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -70,6 +72,26 @@ fun ProfileScreen(
 ) {
     val profile = UserSession.profile
     var showEditDialog by remember { mutableStateOf(false) }
+    var openPage by remember { mutableStateOf<SettingsPage?>(null) }
+
+    // System back returns to the profile instead of leaving the tab
+    BackHandler(enabled = openPage != null) { openPage = null }
+
+    val page = openPage
+    if (page != null) {
+        when (page) {
+            SettingsPage.Notifications -> NotificationsSettingsScreen(onBack = { openPage = null })
+            SettingsPage.AppSettings -> AppSettingsScreen(onBack = { openPage = null })
+            SettingsPage.PrivacySecurity -> PrivacySecurityScreen(onBack = { openPage = null })
+            SettingsPage.DonationHistory -> DonationHistoryScreen(onBack = { openPage = null })
+            SettingsPage.About -> AboutDuGOScreen(onBack = { openPage = null })
+        }
+        return
+    }
+
+    // Privacy setting can hide the phone number on the profile
+    val showContact = AppSettings.prefs(LocalContext.current)
+        .getBoolean(AppSettings.SHOW_CONTACT, true)
 
     Column(
         Modifier
@@ -87,7 +109,7 @@ fun ProfileScreen(
             Text("Profile", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
             Box(
                 Modifier.size(40.dp).clip(CircleShape).background(Color(0xFFF3F4F6))
-                    .clickable(onClick = onNotifications),
+                    .clickable { openPage = SettingsPage.Notifications },
                 contentAlignment = Alignment.Center
             ) {
                 Icon(Icons.Outlined.Notifications, contentDescription = "Notifications", tint = Ink)
@@ -190,17 +212,41 @@ fun ProfileScreen(
 
             ProfileInfoRow(icon = Icons.Outlined.Favorite, label = "Blood Type", value = profile.bloodType)
             ProfileInfoRow(icon = Icons.Outlined.LocationOn, label = "Location", value = profile.location)
-            ProfileInfoRow(icon = Icons.Outlined.Phone, label = "Contact", value = profile.contactNumber)
+            ProfileInfoRow(
+                icon = Icons.Outlined.Phone,
+                label = "Contact",
+                value = if (showContact) profile.contactNumber else "Hidden"
+            )
 
             Spacer(Modifier.height(20.dp))
 
             Text("Settings", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Gray, modifier = Modifier.padding(bottom = 8.dp))
 
-            SettingsRow(icon = Icons.Outlined.Notifications, label = "Notifications", onClick = onNotifications)
-            SettingsRow(icon = Icons.Outlined.Settings, label = "App Settings", onClick = { /* TODO */ })
-            SettingsRow(icon = Icons.Outlined.Lock, label = "Privacy & Security", onClick = { /* TODO */ })
-            SettingsRow(icon = Icons.Outlined.Info, label = "About DuGO", onClick = { /* TODO */ })
-            SettingsRow(icon = Icons.Outlined.Refresh, label = "Donation History", onClick = { /* TODO */ })
+            SettingsRow(
+                icon = Icons.Outlined.Notifications,
+                label = "Notifications",
+                onClick = { openPage = SettingsPage.Notifications }
+            )
+            SettingsRow(
+                icon = Icons.Outlined.Settings,
+                label = "App Settings",
+                onClick = { openPage = SettingsPage.AppSettings }
+            )
+            SettingsRow(
+                icon = Icons.Outlined.Lock,
+                label = "Privacy & Security",
+                onClick = { openPage = SettingsPage.PrivacySecurity }
+            )
+            SettingsRow(
+                icon = Icons.Outlined.Info,
+                label = "About DuGO",
+                onClick = { openPage = SettingsPage.About }
+            )
+            SettingsRow(
+                icon = Icons.Outlined.Refresh,
+                label = "Donation History",
+                onClick = { openPage = SettingsPage.DonationHistory }
+            )
 
             Spacer(Modifier.height(20.dp))
 
