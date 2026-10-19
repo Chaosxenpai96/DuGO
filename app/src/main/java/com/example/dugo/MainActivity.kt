@@ -42,11 +42,11 @@ class MainActivity : ComponentActivity() {
 
     /**
      * The Facebook SDK delivers its result through onActivityResult, which happens
-     * outside the Compose scope, so the result is parked here and read by the
-     * composition when it next runs.
+     * outside the Compose scope, so the result is parked in observable state and
+     * picked up by the composition on its next run.
      */
-    private var pendingFacebookToken: String? = null
-    private var pendingAuthError: String? = null
+    private val pendingFacebookToken = mutableStateOf<String?>(null)
+    private val pendingAuthError = mutableStateOf<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -60,8 +60,8 @@ class MainActivity : ComponentActivity() {
         com.example.dugo.auth.NotificationManager.syncTopics(this)
 
         FacebookAuthCallback.register(
-            onToken = { token -> pendingFacebookToken = token },
-            onFailure = { message -> pendingAuthError = message }
+            onToken = { token -> pendingFacebookToken.value = token },
+            onFailure = { message -> pendingAuthError.value = message }
         )
 
         setContent {
@@ -80,9 +80,9 @@ class MainActivity : ComponentActivity() {
                 }
 
                 // Pick up a Facebook token that arrived through onActivityResult
-                val facebookToken = pendingFacebookToken
+                val facebookToken = pendingFacebookToken.value
                 if (facebookToken != null) {
-                    pendingFacebookToken = null
+                    pendingFacebookToken.value = null
                     isAuthLoading = true
                     scope.launch {
                         when (val result = AuthRepository.signInWithFacebook(facebookToken)) {
@@ -98,8 +98,8 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                pendingAuthError?.let { message ->
-                    pendingAuthError = null
+                pendingAuthError.value?.let { message ->
+                    pendingAuthError.value = null
                     authError = message
                 }
 
