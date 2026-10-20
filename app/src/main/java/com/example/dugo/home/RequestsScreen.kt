@@ -517,7 +517,7 @@ private fun PostRequestDialog(
                 FormTextField(
                     value = location,
                     onValueChange = { location = it },
-                    placeholder = "e.g. Poblacion, Dalaguete",
+                    placeholder = "e.g. Poblacion, Cebu City",
                     leadingIcon = Icons.Outlined.LocationOn,
                     error = if (submitted && !locationOk) "Please enter a location" else null
                 )
@@ -526,7 +526,7 @@ private fun PostRequestDialog(
                 FormTextField(
                     value = hospital,
                     onValueChange = { hospital = it },
-                    placeholder = "e.g. Dalaguete District Hospital"
+                    placeholder = "e.g. Cebu General Hospital"
                 )
 
                 FormLabel("Contact Number")

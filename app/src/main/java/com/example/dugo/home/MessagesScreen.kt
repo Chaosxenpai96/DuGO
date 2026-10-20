@@ -1,7 +1,8 @@
 package com.example.dugo.home
 
+import android.content.Intent
+import android.widget.Toast
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -28,6 +29,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.Send
+import androidx.compose.material.icons.outlined.Call
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material3.HorizontalDivider
@@ -36,21 +38,26 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.net.toUri
 import com.example.dugo.login.Brand
+import kotlinx.coroutines.launch
 
 private val Ink = Color(0xFF1B2230)
 private val Gray = Color(0xFF8A8F99)
@@ -58,18 +65,63 @@ private val Line = Color(0xFFE7E9EE)
 private val BubbleMe = Color(0xFFEE1D2B)
 private val BubbleThem = Color(0xFFF3F4F6)
 
-// Current user's ID (0 = "me" in sample data)
-private const val MY_ID = 0
+/** Short "how long ago" label for a timestamp. */
+private fun timeAgo(timestamp: Long): String {
+    val diff = System.currentTimeMillis() - timestamp
+    val minutes = diff / 60_000
+    val hours = minutes / 60
+    val days = hours / 24
+    return when {
+        minutes < 1 -> "Just now"
+        minutes < 60 -> "${minutes}m ago"
+        hours < 24 -> "${hours}h ago"
+        else -> "${days}d ago"
+    }
+}
 
 @Composable
 fun MessagesScreen(
     selectedTab: HomeTab = HomeTab.Messages,
     onTabSelected: (HomeTab) -> Unit = {},
     onNotifications: () -> Unit = {},
-    onProfile: () -> Unit = {}
+    onProfile: () -> Unit = {},
+    /** Opens a chat with this person straight away, used from a donor card. */
+    startWith: Donor? = null,
+    /** Called once the chat has been opened, so it is not reopened. */
+    onStarted: () -> Unit = {}
 ) {
-    val conversations = remember { mutableStateListOf(*sampleConversations.toTypedArray()) }
+    val scope = rememberCoroutineScope()
+    var conversations by remember { mutableStateOf<List<Conversation>>(emptyList()) }
+    var loadError by remember { mutableStateOf<String?>(null) }
     var openConversation by remember { mutableStateOf<Conversation?>(null) }
+    val startWithDonor = startWith
+
+    DisposableEffect(Unit) {
+        val registration = MessageRepository.listenConversations(
+            onChange = { conversations = it; loadError = null },
+            onError = { loadError = it }
+        )
+        onDispose { registration.remove() }
+    }
+
+    // Opening a chat from the map: make sure the conversation exists, then show it
+    LaunchedEffect(startWithDonor) {
+        val donor = startWithDonor ?: return@LaunchedEffect
+        val id = MessageRepository.ensureConversation(
+            recipientUid = donor.uid,
+            recipientName = donor.name,
+            recipientBloodType = donor.bloodType,
+            recipientAvailable = donor.availableToday
+        )
+        if (id.isNotBlank()) {
+            openConversation = Conversation(
+                id = id,
+                contact = donor,
+                messages = mutableListOf()
+            )
+        }
+        onStarted()
+    }
 
     val current = openConversation
 
@@ -81,20 +133,14 @@ fun MessagesScreen(
     } else {
         ConversationListScreen(
             conversations = conversations,
+            loadError = loadError,
             selectedTab = selectedTab,
             onTabSelected = onTabSelected,
             onNotifications = onNotifications,
             onProfile = onProfile,
             onOpen = { conv ->
-                // Mark all as read when opening
-                val idx = conversations.indexOf(conv)
-                if (idx >= 0) {
-                    val updated = conv.copy(
-                        messages = conv.messages.map { it.copy(isRead = true) }.toMutableList()
-                    )
-                    conversations[idx] = updated
-                    openConversation = updated
-                }
+                openConversation = conv
+                scope.launch { MessageRepository.markRead(conv.id) }
             }
         )
     }
@@ -102,7 +148,8 @@ fun MessagesScreen(
 
 @Composable
 private fun ConversationListScreen(
-    conversations: MutableList<Conversation>,
+    conversations: List<Conversation>,
+    loadError: String?,
     selectedTab: HomeTab,
     onTabSelected: (HomeTab) -> Unit,
     onNotifications: () -> Unit,
@@ -127,7 +174,11 @@ private fun ConversationListScreen(
             Column(Modifier.weight(1f)) {
                 Text("Messages", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                 Text(
-                    if (totalUnread > 0) "$totalUnread unread" else "All caught up",
+                    when {
+                        totalUnread > 0 -> "$totalUnread unread"
+                        loadError != null -> "Couldn't load messages"
+                        else -> "All caught up"
+                    },
                     color = if (totalUnread > 0) BubbleMe else Gray,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Medium
@@ -154,16 +205,29 @@ private fun ConversationListScreen(
 
         if (conversations.isEmpty()) {
             Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("No messages yet", color = Gray, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.height(6.dp))
-                    Text("Contact a donor to start a conversation.", color = Gray, fontSize = 13.sp)
+                Column(
+                    Modifier.padding(horizontal = 32.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    val error = loadError
+                    if (error != null) {
+                        Text("Couldn't load messages", color = Gray, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.height(6.dp))
+                        Text(error, color = BubbleMe, fontSize = 13.sp)
+                    } else {
+                        Text("No messages yet", color = Gray, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            "Contact a donor from the map to start a conversation.",
+                            color = Gray, fontSize = 13.sp
+                        )
+                    }
                 }
             }
         } else {
             LazyColumn(Modifier.weight(1f)) {
                 items(
-                    conversations.sortedByDescending { it.lastMessage?.sentAt ?: 0L }
+                    conversations.sortedByDescending { it.lastAt }
                 ) { conv ->
                     ConversationRow(conv, onClick = { onOpen(conv) })
                     HorizontalDivider(color = Line, modifier = Modifier.padding(start = 80.dp))
@@ -206,7 +270,7 @@ private fun ConversationRow(conv: Conversation, onClick: () -> Unit) {
                     modifier = Modifier.weight(1f)
                 )
                 Text(
-                    conv.lastMessage?.timeAgo() ?: "",
+                    if (conv.lastAt > 0L) timeAgo(conv.lastAt) else "",
                     fontSize = 11.sp,
                     color = if (hasUnread) BubbleMe else Gray
                 )
@@ -224,13 +288,13 @@ private fun ConversationRow(conv: Conversation, onClick: () -> Unit) {
                 }
                 Spacer(Modifier.width(6.dp))
                 Text(
-                    conv.lastMessage?.text ?: "",
+                    conv.lastText,
                     fontSize = 13.sp,
                     color = if (hasUnread) Ink else Gray,
                     fontWeight = if (hasUnread) FontWeight.Medium else FontWeight.Normal,
                     maxLines = 1,
                     modifier = Modifier.weight(1f),
-                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                    overflow = TextOverflow.Ellipsis
                 )
                 if (hasUnread) {
                     Spacer(Modifier.width(8.dp))
@@ -253,14 +317,43 @@ private fun ConversationRow(conv: Conversation, onClick: () -> Unit) {
 
 @Composable
 private fun ChatScreen(conversation: Conversation, onBack: () -> Unit) {
-    val messages = remember { mutableStateListOf(*conversation.messages.toTypedArray()) }
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var messages by remember { mutableStateOf<List<Message>>(emptyList()) }
+    var loadError by remember { mutableStateOf<String?>(null) }
     var draft by remember { mutableStateOf("") }
+    var isSending by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
-    var nextId by remember { mutableStateOf(messages.size + 100) }
+
+    DisposableEffect(conversation.id) {
+        val registration = MessageRepository.listenMessages(
+            conversationId = conversation.id,
+            onChange = { messages = it; loadError = null },
+            onError = { loadError = it }
+        )
+        onDispose { registration.remove() }
+    }
 
     // Scroll to bottom when messages change
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) listState.animateScrollToItem(messages.size - 1)
+    }
+
+    fun send() {
+        val text = draft.trim()
+        if (text.isBlank() || isSending) return
+        isSending = true
+        scope.launch {
+            MessageRepository.sendMessage(
+                recipientUid = conversation.contact.uid,
+                recipientName = conversation.contact.name,
+                recipientBloodType = conversation.contact.bloodType,
+                recipientAvailable = conversation.contact.availableToday,
+                text = text
+            )
+            draft = ""
+            isSending = false
+        }
     }
 
     Column(
@@ -308,6 +401,23 @@ private fun ChatScreen(conversation: Conversation, onBack: () -> Unit) {
                     Text("  •  ${conversation.contact.bloodType}", color = Brand, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 }
             }
+            if (conversation.contact.phone.isNotBlank()) {
+                Box(
+                    Modifier.size(40.dp).clip(CircleShape).background(Color(0xFFEEF0F3))
+                        .clickable {
+                            runCatching {
+                                context.startActivity(
+                                    Intent(Intent.ACTION_DIAL, "tel:${conversation.contact.phone}".toUri())
+                                )
+                            }.onFailure {
+                                Toast.makeText(context, "No dialer found", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Outlined.Call, contentDescription = "Call", tint = Ink, modifier = Modifier.size(18.dp))
+                }
+            }
         }
 
         HorizontalDivider(color = Line)
@@ -319,6 +429,16 @@ private fun ChatScreen(conversation: Conversation, onBack: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(8.dp),
             contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 12.dp)
         ) {
+            if (loadError != null) {
+                item {
+                    Text(
+                        loadError!!,
+                        color = BubbleMe,
+                        fontSize = 13.sp,
+                        modifier = Modifier.padding(vertical = 12.dp)
+                    )
+                }
+            }
             items(messages) { msg ->
                 MessageBubble(msg)
             }
@@ -342,20 +462,7 @@ private fun ChatScreen(conversation: Conversation, onBack: () -> Unit) {
                 shape = RoundedCornerShape(24.dp),
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                keyboardActions = KeyboardActions(onSend = {
-                    if (draft.isNotBlank()) {
-                        messages.add(
-                            Message(
-                                id = nextId++,
-                                senderId = MY_ID,
-                                receiverId = conversation.contact.id,
-                                text = draft.trim()
-                            )
-                        )
-                        conversation.messages.add(messages.last())
-                        draft = ""
-                    }
-                }),
+                keyboardActions = KeyboardActions(onSend = { send() }),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedContainerColor = Color(0xFFF7F8FA),
                     unfocusedContainerColor = Color(0xFFF7F8FA),
@@ -368,21 +475,8 @@ private fun ChatScreen(conversation: Conversation, onBack: () -> Unit) {
                 Modifier
                     .size(48.dp)
                     .clip(CircleShape)
-                    .background(if (draft.isNotBlank()) BubbleMe else Line)
-                    .clickable(enabled = draft.isNotBlank()) {
-                        if (draft.isNotBlank()) {
-                            messages.add(
-                                Message(
-                                    id = nextId++,
-                                    senderId = MY_ID,
-                                    receiverId = conversation.contact.id,
-                                    text = draft.trim()
-                                )
-                            )
-                            conversation.messages.add(messages.last())
-                            draft = ""
-                        }
-                    },
+                    .background(if (draft.isNotBlank() && !isSending) BubbleMe else Line)
+                    .clickable(enabled = draft.isNotBlank() && !isSending) { send() },
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
@@ -398,7 +492,8 @@ private fun ChatScreen(conversation: Conversation, onBack: () -> Unit) {
 
 @Composable
 private fun MessageBubble(msg: Message) {
-    val isMe = msg.senderId == MY_ID
+    val myUid = com.example.dugo.auth.AuthRepository.currentUser?.uid
+    val isMe = msg.senderUid.isNotBlank() && msg.senderUid == myUid
     Row(
         Modifier.fillMaxWidth(),
         horizontalArrangement = if (isMe) Arrangement.End else Arrangement.Start

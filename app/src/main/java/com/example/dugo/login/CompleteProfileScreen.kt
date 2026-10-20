@@ -115,7 +115,7 @@ fun CompleteProfileScreen(
             FormTextField(
                 value = location,
                 onValueChange = { location = it },
-                placeholder = "e.g. Poblacion, Dalaguete",
+                placeholder = "e.g. Poblacion, Cebu City",
                 leadingIcon = Icons.Outlined.LocationOn,
                 error = if (submitted && !locationOk) "Please enter your location" else null
             )

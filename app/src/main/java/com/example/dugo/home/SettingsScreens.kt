@@ -805,7 +805,7 @@ fun AboutDuGOScreen(onBack: () -> Unit) {
 
         Spacer(Modifier.height(8.dp))
         InfoText(
-            "DuGO connects blood donors and seekers in Dalaguete, Cebu. " +
+            "DuGO connects blood donors and seekers across Cebu. " +
                 "Post a request, find nearby donors, and coordinate directly — " +
                 "built to make urgent blood needs easier to meet."
         )
@@ -833,9 +833,9 @@ fun AboutDuGOScreen(onBack: () -> Unit) {
         ActionRow(
             icon = Icons.Outlined.LocationOn,
             title = "Location",
-            subtitle = "Dalaguete, Cebu, Philippines",
+            subtitle = "Cebu, Philippines",
             onClick = {
-                val uri = "geo:9.7612,123.5349?q=Dalaguete,+Cebu".toUri()
+                val uri = "geo:10.3167,123.8854?q=Cebu,+Philippines".toUri()
                 runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, uri)) }
                     .onFailure { Toast.makeText(context, "No maps app found", Toast.LENGTH_SHORT).show() }
             }
@@ -954,8 +954,12 @@ private const val ELIGIBILITY_DAYS = 90L
 private fun formatDate(millis: Long): String =
     SimpleDateFormat("MMM d, yyyy", Locale.getDefault()).format(Date(millis))
 
+/**
+ * Loads the donations logged on this device. A new account starts with none —
+ * there's no sample history.
+ */
 private fun loadDonations(prefs: SharedPreferences): MutableList<DonationRecord> {
-    val raw = prefs.getString(AppSettings.DONATIONS, null) ?: return seedDonations(prefs)
+    val raw = prefs.getString(AppSettings.DONATIONS, null) ?: return mutableListOf()
     return runCatching {
         val array = JSONArray(raw)
         MutableList(array.length()) { i ->
@@ -969,7 +973,7 @@ private fun loadDonations(prefs: SharedPreferences): MutableList<DonationRecord>
                 notes = o.optString("notes", "")
             )
         }
-    }.getOrElse { seedDonations(prefs) }
+    }.getOrElse { mutableListOf() }
 }
 
 private fun saveDonations(prefs: SharedPreferences, list: List<DonationRecord>) {
@@ -987,16 +991,4 @@ private fun saveDonations(prefs: SharedPreferences, list: List<DonationRecord>) 
         )
     }
     prefs.edit().putString(AppSettings.DONATIONS, array.toString()).apply()
-}
-
-/** Starts a new user with a few sample donations, stored locally. */
-private fun seedDonations(prefs: SharedPreferences): MutableList<DonationRecord> {
-    val now = System.currentTimeMillis()
-    val seeded = mutableListOf(
-        DonationRecord(1, now - 95 * DAY_MS, "O+", "Cebu South Medical Center", "Cebu City", "Whole blood"),
-        DonationRecord(2, now - 210 * DAY_MS, "O+", "Dalaguete District Hospital", "Dalaguete", ""),
-        DonationRecord(3, now - 330 * DAY_MS, "O+", "Philippine Red Cross", "Cebu City", "")
-    )
-    saveDonations(prefs, seeded)
-    return seeded
 }

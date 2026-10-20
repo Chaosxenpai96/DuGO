@@ -64,6 +64,7 @@ import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -127,14 +128,13 @@ private const val ALL_AREAS = "All areas"
 
 private const val TOWN_ZOOM = 12f
 private const val AREA_ZOOM = 14f
-private const val MAX_RADIUS_KM = 20
+private const val MAX_RADIUS_KM = 100
 
 /** ID of the signed-in user's own pin, which the sample donors (1-5) never use. */
 private const val SELF_DONOR_ID = -1
 
 private fun zoomForRadius(radiusKm: Double): Float =
     (14.6 - ln(radiusKm) / ln(2.0) * 0.95).toFloat()
-
 enum class HomeTab(val label: String, val icon: ImageVector) {
     Map("Map", Icons.Outlined.Place),
     Requests("Requests", Icons.Outlined.DateRange),
@@ -170,6 +170,17 @@ fun HomeScreenMap(
     var sheetMinimized by remember { mutableStateOf(false) }
     var usingMyLocation by remember { mutableStateOf(false) }
 
+    // Real donors who have signed up and saved their position
+    var liveDonors by remember { mutableStateOf<List<Donor>>(emptyList()) }
+
+    DisposableEffect(Unit) {
+        val registration = DonorRepository.listenDonors(
+            onChange = { liveDonors = it },
+            onError = { /* the sample donors stay on the map */ }
+        )
+        onDispose { registration.remove() }
+    }
+
     // The signed-in user's pin. Its position is the device's GPS fix; the saved
     // profile position is used until the first fix arrives.
     val profile = UserSession.profile
@@ -188,9 +199,9 @@ fun HomeScreenMap(
         AuthRepository.saveLocation(gps.first, gps.second)
     }
 
-    // Map camera starts focused on Dalaguete
+    // Map camera starts on the user's last known position, or the default centre
     val cameraPositionState = rememberCameraPositionState {
-        position = CameraPosition.fromLatLngZoom(LatLng(DALAGUETE_LAT, DALAGUETE_LNG), TOWN_ZOOM)
+        position = CameraPosition.fromLatLngZoom(LatLng(DEFAULT_LAT, DEFAULT_LNG), TOWN_ZOOM)
     }
 
     // Location permission
@@ -212,16 +223,16 @@ fun HomeScreenMap(
         )
     }
 
-    var origin by remember { mutableStateOf(DALAGUETE_LAT to DALAGUETE_LNG) }
+    var origin by remember { mutableStateOf(DEFAULT_LAT to DEFAULT_LNG) }
 
     // Ask for location permission the first time the map opens
     LaunchedEffect(Unit) {
         if (!granted) askLocation()
     }
 
-    // When area filter changes, shift origin to that barangay center
+    // When area filter changes, shift origin to that area's centre
     LaunchedEffect(areaFilter) {
-        val area = DALAGUETE_AREAS.firstOrNull { it.name == areaFilter }
+        val area = CEBU_REGIONS.firstOrNull { it.name == areaFilter }
         if (area != null) {
             origin = area.lat to area.lng
             usingMyLocation = false
@@ -276,8 +287,11 @@ fun HomeScreenMap(
             isSelf = true
         )
     }
-    val allDonors = remember(donors, selfPin) {
-        if (selfPin != null) donors + selfPin else donors
+    val allDonors = remember(donors, liveDonors, selfPin) {
+        val myUid = AuthRepository.currentUser?.uid
+        // The signed-in donor has their own pin, so drop their other copy
+        val list = donors + liveDonors.filter { it.uid != myUid }
+        if (selfPin != null) list + selfPin else list
     }
 
     val visible = remember(allDonors, query, bloodFilter, areaFilter, dismissed, radiusKm, origin) {
@@ -298,7 +312,7 @@ fun HomeScreenMap(
     val areaName = when {
         areaFilter != ALL_AREAS -> areaFilter
         usingMyLocation -> "your area"
-        else -> "Dalaguete"
+        else -> "Cebu"
     }
 
     Column(
@@ -352,18 +366,18 @@ fun HomeScreenMap(
                 onSelected = { bloodFilter = it; showAll = false }
             )
             FilterDropdown(
-                options = listOf(ALL_AREAS) + DALAGUETE_AREAS.map { it.name },
+                options = listOf(ALL_AREAS) + CEBU_REGIONS.map { it.name },
                 selected = areaFilter,
                 leadingIcon = Icons.Outlined.LocationOn,
                 onSelected = { choice ->
                     areaFilter = choice
                     showAll = false
                     // Fly the map to the chosen area
-                    val area = DALAGUETE_AREAS.firstOrNull { it.name == choice }
+                    val area = CEBU_REGIONS.firstOrNull { it.name == choice }
                     val update = if (area != null) {
                         CameraUpdateFactory.newLatLngZoom(LatLng(area.lat, area.lng), AREA_ZOOM)
                     } else {
-                        CameraUpdateFactory.newLatLngZoom(LatLng(DALAGUETE_LAT, DALAGUETE_LNG), TOWN_ZOOM)
+                        CameraUpdateFactory.newLatLngZoom(LatLng(DEFAULT_LAT, DEFAULT_LNG), TOWN_ZOOM)
                     }
                     scope.launch { cameraPositionState.animate(update) }
                 }
@@ -389,7 +403,7 @@ fun HomeScreenMap(
                     }
                 },
                 valueRange = 1f..MAX_RADIUS_KM.toFloat(),
-                steps = 18, // 1, 2, 3 ... 20 km
+                steps = 19, // 1, 2, 3 ... 100 km
                 colors = SliderDefaults.colors(
                     thumbColor = Brand,
                     activeTrackColor = Brand,
@@ -573,7 +587,19 @@ fun HomeScreenMap(
                                         Toast.makeText(context, "No dialer found", Toast.LENGTH_SHORT).show()
                                     }
                                 },
-                                onMessage = { onMessageDonor(donor) }
+                                onMessage = {
+                                    // Sample donors aren't real accounts, so there is
+                                    // nobody to message yet
+                                    if (donor.uid.isBlank()) {
+                                        Toast.makeText(
+                                            context,
+                                            "${donor.name} is a test donor. Sign in with a real account to chat.",
+                                            Toast.LENGTH_LONG
+                                        ).show()
+                                    } else {
+                                        onMessageDonor(donor)
+                                    }
+                                }
                             )
                             Spacer(Modifier.height(12.dp))
                         }
@@ -627,7 +653,7 @@ private fun HomeHeader(
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(roleLabel, color = Brand, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-            Text(if (usingMyLocation) "Near your location" else "Dalaguete, Cebu", color = Gray, fontSize = 12.sp)
+            Text(if (usingMyLocation) "Near your location" else "Cebu, Philippines", color = Gray, fontSize = 12.sp)
         }
         Box(
             Modifier.size(40.dp).clip(CircleShape).background(Color(0xFFF3F4F6)).clickable(onClick = onNotifications),
@@ -693,7 +719,7 @@ private fun FilterDropdown(
     }
 }
 
-/** Real Google Map focused on Dalaguete, with a blood-type pin for each donor. */
+/** Real Google Map centred on the user's position, with a blood-type pin for each donor. */
 @Composable
 private fun DonorMap(
     donors: List<Donor>,

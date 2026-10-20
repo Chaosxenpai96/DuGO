@@ -13,3 +13,6 @@
 .externalNativeBuild
 .cxx
 local.properties
+
+# Build output that's copied out for sharing
+/dugo2.apk

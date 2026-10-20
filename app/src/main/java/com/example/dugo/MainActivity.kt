@@ -79,6 +79,8 @@ class MainActivity : ComponentActivity() {
                 var roleLabel by remember { mutableStateOf("Blood Donor") }
                 var authError by remember { mutableStateOf<String?>(null) }
                 var isAuthLoading by remember { mutableStateOf(false) }
+                // The donor a chat was opened with, set when messaging from the map
+                var messageWith by remember { mutableStateOf<com.example.dugo.home.Donor?>(null) }
                 val scope = rememberCoroutineScope()
 
                 fun onAuthSuccess() {
@@ -307,7 +309,10 @@ class MainActivity : ComponentActivity() {
                         },
                         onNotifications = { screen = Screen.Profile },
                         onProfile = { screen = Screen.Profile },
-                        onMessageDonor = { screen = Screen.Messages }
+                        onMessageDonor = { donor ->
+                            messageWith = donor
+                            screen = Screen.Messages
+                        }
                     )
 
                     Screen.Requests -> RequestsScreen(
@@ -327,16 +332,18 @@ class MainActivity : ComponentActivity() {
 
                     Screen.Messages -> MessagesScreen(
                         selectedTab = HomeTab.Messages,
+                        startWith = messageWith,
+                        onStarted = { messageWith = null },
                         onTabSelected = { tab ->
                             when (tab) {
-                                HomeTab.Map -> screen = Screen.Home
-                                HomeTab.Requests -> screen = Screen.Requests
+                                HomeTab.Map -> { messageWith = null; screen = Screen.Home }
+                                HomeTab.Requests -> { messageWith = null; screen = Screen.Requests }
                                 HomeTab.Messages -> { /* already here */ }
-                                HomeTab.Profile -> screen = Screen.Profile
+                                HomeTab.Profile -> { messageWith = null; screen = Screen.Profile }
                             }
                         },
-                        onNotifications = { screen = Screen.Profile },
-                        onProfile = { screen = Screen.Profile }
+                        onNotifications = { messageWith = null; screen = Screen.Profile },
+                        onProfile = { messageWith = null; screen = Screen.Profile }
                     )
 
                     Screen.Profile -> ProfileScreen(
