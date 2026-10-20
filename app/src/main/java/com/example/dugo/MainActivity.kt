@@ -210,7 +210,9 @@ class MainActivity : ComponentActivity() {
                                     role = "Blood Donor",
                                     availableToday = form.availableAnytime,
                                     totalDonations = 0,
-                                    joinedDate = joinedDate()
+                                    joinedDate = joinedDate(),
+                                    latitude = form.latitude,
+                                    longitude = form.longitude
                                 ),
                                 form.password,
                                 mapOf(
@@ -236,7 +238,9 @@ class MainActivity : ComponentActivity() {
                                     role = "Blood Seeker",
                                     availableToday = false,
                                     totalDonations = 0,
-                                    joinedDate = joinedDate()
+                                    joinedDate = joinedDate(),
+                                    latitude = form.latitude,
+                                    longitude = form.longitude
                                 ),
                                 form.password,
                                 mapOf("notes" to form.notes)

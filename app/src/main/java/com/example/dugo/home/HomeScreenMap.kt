@@ -89,6 +89,8 @@ import androidx.core.graphics.toColorInt
 import androidx.core.net.toUri
 import com.example.dugo.R
 import com.example.dugo.auth.AuthRepository
+import com.example.dugo.location.currentLocation
+import com.example.dugo.location.hasLocationPermission
 import com.example.dugo.login.BLOOD_TYPES
 import com.example.dugo.login.Brand
 import com.google.android.gms.location.LocationServices
@@ -132,28 +134,6 @@ private const val SELF_DONOR_ID = -1
 
 private fun zoomForRadius(radiusKm: Double): Float =
     (14.6 - ln(radiusKm) / ln(2.0) * 0.95).toFloat()
-
-@SuppressLint("MissingPermission")
-private fun lastKnownLocation(context: Context): Pair<Double, Double>? {
-    val lm = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return null
-    return runCatching {
-        lm.getProviders(true)
-            .mapNotNull { lm.getLastKnownLocation(it) }
-            .maxByOrNull { it.time }
-            ?.let { it.latitude to it.longitude }
-    }.getOrNull()
-}
-
-/** Requests a fresh GPS fix, falling back to the last known location. */
-@SuppressLint("MissingPermission")
-private suspend fun currentLocation(context: Context): Pair<Double, Double>? =
-    withContext(Dispatchers.IO) {
-        runCatching {
-            val client = LocationServices.getFusedLocationProviderClient(context)
-            val token = CancellationTokenSource()
-            Tasks.await(client.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, token.token))
-        }.getOrNull()?.let { it.latitude to it.longitude } ?: lastKnownLocation(context)
-    }
 
 enum class HomeTab(val label: String, val icon: ImageVector) {
     Map("Map", Icons.Outlined.Place),
@@ -202,10 +182,10 @@ fun HomeScreenMap(
     }
     val isDonor = profile.role == "Blood Donor"
 
-    // Moves the donor's own pin and remembers the position for next time
+    // Moves the user's own pin and remembers the position for next time
     fun useOwnPosition(gps: Pair<Double, Double>) {
         myGps = gps
-        if (isDonor) AuthRepository.saveLocation(gps.first, gps.second)
+        AuthRepository.saveLocation(gps.first, gps.second)
     }
 
     // Map camera starts focused on Dalaguete
@@ -214,13 +194,9 @@ fun HomeScreenMap(
     }
 
     // Location permission
-    fun hasLocationPermission(): Boolean =
-        ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) ==
-                PackageManager.PERMISSION_GRANTED ||
-                ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) ==
-                PackageManager.PERMISSION_GRANTED
+    fun locationGranted(): Boolean = hasLocationPermission(context)
 
-    var granted by remember { mutableStateOf(hasLocationPermission()) }
+    var granted by remember { mutableStateOf(locationGranted()) }
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { result ->
@@ -286,7 +262,7 @@ fun HomeScreenMap(
         }
     }
 
-    // Donors appear on the map with their own pin, on top of the sample donors
+    // The signed-in donor's pin, shown alongside the sample donors
     val selfPin = myGps?.takeIf { isDonor }?.let { (lat, lng) ->
         Donor(
             id = SELF_DONOR_ID,
