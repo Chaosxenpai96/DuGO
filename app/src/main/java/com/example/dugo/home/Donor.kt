@@ -23,8 +23,8 @@ data class Donor(
 data class Area(val name: String, val lat: Double, val lng: Double)
 
 // Default map centre, used until the device's position is known. Cebu City.
-const val DEFAULT_LAT = 10.3167
-const val DEFAULT_LNG = 123.8854
+const val DEFAULT_LAT = 10.3230
+const val DEFAULT_LNG = 123.9060
 
 /** A person in the sample data. */
 private data class SamplePerson(val name: String, val bloodType: String, val available: Boolean)
@@ -48,7 +48,7 @@ private data class SampleTown(
  */
 private val SAMPLE_TOWNS = listOf(
     SampleTown(
-        "Cebu City", 10.3167, 123.8854,
+        "Cebu City", 10.3230, 123.9060,
         listOf("Poblacion", "Lahug", "Mabolo", "Tisa", "Talamban", "Santo Niño"),
         listOf(
             SamplePerson("Mia Santos", "O+", true),
@@ -60,7 +60,7 @@ private val SAMPLE_TOWNS = listOf(
         )
     ),
     SampleTown(
-        "Lapu-Lapu City", 10.3106, 123.9854,
+        "Lapu-Lapu City", 10.2633, 123.9533,
         listOf("Poblacion", "Mactan", "Pusok", "Canlubang", "Looc"),
         listOf(
             SamplePerson("Rico Tano", "A-", true),
@@ -71,7 +71,7 @@ private val SAMPLE_TOWNS = listOf(
         )
     ),
     SampleTown(
-        "Mandaue", 10.2353, 123.9422,
+        "Mandaue", 10.3154, 124.0028,
         listOf("Poblacion", "Subdivision", "Udo", "Tabok", "Pak-na-Luma"),
         listOf(
             SamplePerson("Jude Caceres", "AB+", true),
@@ -82,7 +82,7 @@ private val SAMPLE_TOWNS = listOf(
         )
     ),
     SampleTown(
-        "Talisay", 10.3075, 123.8475,
+        "Talisay", 10.2459, 123.8252,
         listOf("Poblacion", "Tabunan", "Lutopan", "Cawongan", "Candabong"),
         listOf(
             SamplePerson("Bela Singson", "O-", true),
@@ -93,7 +93,7 @@ private val SAMPLE_TOWNS = listOf(
         )
     ),
     SampleTown(
-        "Naga", 10.3111, 123.7167,
+        "Naga", 10.0755, 123.7493,
         listOf("Poblacion", "Tago", "Pasil", "San Vicente", "Malagtas"),
         listOf(
             SamplePerson("Lorna Pangilinan", "B+", true),
@@ -104,7 +104,7 @@ private val SAMPLE_TOWNS = listOf(
         )
     ),
     SampleTown(
-        "Daanbantayan", 10.5639, 123.8639,
+        "Daanbantayan", 11.2258, 123.8992,
         listOf("Poblacion", "Cantiguib", "Tabok", "Tortal", "Busay"),
         listOf(
             SamplePerson("Ester Muring", "AB-", true),
@@ -115,7 +115,7 @@ private val SAMPLE_TOWNS = listOf(
         )
     ),
     SampleTown(
-        "Bogo", 10.8075, 124.0656,
+        "Bogo", 11.0042, 124.0035,
         listOf("Poblacion", "Cogon", "Napo", "Tabok", "Guinsay"),
         listOf(
             SamplePerson("Manolo Yniguez", "A+", true),
@@ -126,7 +126,7 @@ private val SAMPLE_TOWNS = listOf(
         )
     ),
     SampleTown(
-        "Danao", 10.2467, 123.8856,
+        "Danao", 10.5468, 123.9841,
         listOf("Poblacion", "Tabok", "Alang", "Tapon", "Canturing"),
         listOf(
             SamplePerson("Boy Tabinas", "B-", true),
@@ -137,7 +137,7 @@ private val SAMPLE_TOWNS = listOf(
         )
     ),
     SampleTown(
-        "Carmen", 10.2406, 123.9131,
+        "Carmen", 10.5672, 123.9975,
         listOf("Poblacion", "Alegria", "Tabog", "Tubog", "Taming"),
         listOf(
             SamplePerson("Eddie Cunanan", "O+", true),
@@ -148,7 +148,7 @@ private val SAMPLE_TOWNS = listOf(
         )
     ),
     SampleTown(
-        "Argao", 10.6283, 123.9108,
+        "Argao", 9.9127, 123.4775,
         listOf("Poblacion", "Bago", "Bahay", "Tabok", "Mesa"),
         listOf(
             SamplePerson("Amie Villar", "A-", true),
@@ -159,7 +159,7 @@ private val SAMPLE_TOWNS = listOf(
         )
     ),
     SampleTown(
-        "Dumanjug", 10.2833, 123.6333,
+        "Dumanjug", 10.0262, 123.5244,
         listOf("Poblacion", "Alejos", "Tabok", "Mambajog", "Suba"),
         listOf(
             SamplePerson("Yawl Patching", "AB+", true),
@@ -170,7 +170,7 @@ private val SAMPLE_TOWNS = listOf(
         )
     ),
     SampleTown(
-        "Sogod", 10.7833, 123.4333,
+        "Sogod", 10.7339, 124.2572,
         listOf("Poblacion", "Calanggaman", "Pound", "Tabok", "Wer"),
         listOf(
             SamplePerson("Dan Toledo", "O-", true),
@@ -181,7 +181,7 @@ private val SAMPLE_TOWNS = listOf(
         )
     ),
     SampleTown(
-        "Getafe", 10.7569, 123.4100,
+        "Getafe", 10.3420, 124.0593,
         listOf("Poblacion", "Tayud", "Tabok", "Calanipawan", "Magsaysay"),
         listOf(
             SamplePerson("Tess Boljoon", "B+", true),
@@ -192,7 +192,7 @@ private val SAMPLE_TOWNS = listOf(
         )
     ),
     SampleTown(
-        "Barili", 10.4147, 123.4936,
+        "Barili", 10.1118, 123.6050,
         listOf("Poblacion", "Batuan", "Buan", "Tangnan", "Vito"),
         listOf(
             SamplePerson("Kaye Suyo", "AB-", true),
@@ -203,7 +203,7 @@ private val SAMPLE_TOWNS = listOf(
         )
     ),
     SampleTown(
-        "Moalboal", 9.9333, 123.3667,
+        "Moalboal", 9.9570, 123.4000,
         listOf("Poblacion", "Basakdoku", "Bug-os", "Sambag", "Tangka"),
         listOf(
             SamplePerson("Anya Gretchin", "A+", true),
@@ -214,7 +214,7 @@ private val SAMPLE_TOWNS = listOf(
         )
     ),
     SampleTown(
-        "Toledo City", 10.1750, 123.4917,
+        "Toledo City", 10.3724, 123.6338,
         listOf("Poblacion", "San Roque", "Tabok", "Ilihan", "Tomoc"),
         listOf(
             SamplePerson("Cathy Padasoy", "B-", true),
@@ -225,7 +225,7 @@ private val SAMPLE_TOWNS = listOf(
         )
     ),
     SampleTown(
-        "Carcar", 10.7333, 123.8500,
+        "Carcar", 10.1028, 123.6495,
         listOf("Poblacion", "Baragola", "Busilis", "Maya", "Miniloc"),
         listOf(
             SamplePerson("Romel Imperial", "O+", true),
@@ -236,7 +236,7 @@ private val SAMPLE_TOWNS = listOf(
         )
     ),
     SampleTown(
-        "Liloan", 10.1314, 123.7358,
+        "Liloan", 10.3301, 123.9953,
         listOf("Poblacion", "Cabase", "Candijay", "Luy-a", "Malinao"),
         listOf(
             SamplePerson("Alma Cancino", "A-", true),
