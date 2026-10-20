@@ -236,7 +236,7 @@ private val SAMPLE_TOWNS = listOf(
         )
     ),
     SampleTown(
-        "Liloan", 10.3301, 123.9953,
+        "Liloan", 10.3000, 123.9830,
         listOf("Poblacion", "Cabase", "Candijay", "Luy-a", "Malinao"),
         listOf(
             SamplePerson("Alma Cancino", "A-", true),
