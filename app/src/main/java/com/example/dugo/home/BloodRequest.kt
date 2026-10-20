@@ -10,7 +10,8 @@ enum class UrgencyLevel(val label: String, val emoji: String) {
 }
 
 data class BloodRequest(
-    val id: Int,
+    val id: String = "",        // Firestore document ID; empty until saved
+    val posterUid: String = "",
     val posterName: String,
     val bloodType: String,
     val location: String,
@@ -36,40 +37,3 @@ data class BloodRequest(
     fun formattedDate(): String =
         SimpleDateFormat("MMM d, yyyy · h:mm a", Locale.getDefault()).format(Date(postedAt))
 }
-
-/** Sample requests shown before any real backend is connected. */
-val sampleRequests = mutableListOf(
-    BloodRequest(
-        id = 1,
-        posterName = "Ana Reyes",
-        bloodType = "O+",
-        location = "Poblacion, Dalaguete",
-        hospital = "Dalaguete District Hospital",
-        notes = "Needed for scheduled surgery on Monday morning.",
-        urgency = UrgencyLevel.Urgent,
-        contact = "09171234567",
-        postedAt = System.currentTimeMillis() - 15 * 60_000
-    ),
-    BloodRequest(
-        id = 2,
-        posterName = "Rico Tano",
-        bloodType = "A+",
-        location = "Consolacion, Dalaguete",
-        hospital = "Private clinic",
-        notes = "For a family member recovering from an operation.",
-        urgency = UrgencyLevel.Normal,
-        contact = "09281234567",
-        postedAt = System.currentTimeMillis() - 2 * 60 * 60_000
-    ),
-    BloodRequest(
-        id = 3,
-        posterName = "Lhen Cruz",
-        bloodType = "B-",
-        location = "Coro, Dalaguete",
-        hospital = "Cebu South Medical Center",
-        notes = "Emergency — accident victim, please respond ASAP.",
-        urgency = UrgencyLevel.Urgent,
-        contact = "09391234567",
-        postedAt = System.currentTimeMillis() - 5 * 60 * 60_000
-    )
-)

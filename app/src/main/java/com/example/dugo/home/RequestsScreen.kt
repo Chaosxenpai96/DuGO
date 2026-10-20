@@ -42,10 +42,11 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -54,6 +55,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -62,9 +64,11 @@ import com.example.dugo.login.BLOOD_TYPES
 import com.example.dugo.login.BloodTypeDropdown
 import com.example.dugo.login.Brand
 import com.example.dugo.login.FormButton
+import com.example.dugo.login.FormError
 import com.example.dugo.login.FormLabel
 import com.example.dugo.login.FormTextField
 import com.example.dugo.login.isValidPhNumber
+import kotlinx.coroutines.launch
 
 private val Ink = Color(0xFF1B2230)
 private val Gray = Color(0xFF8A8F99)
@@ -81,12 +85,27 @@ fun RequestsScreen(
     onTabSelected: (HomeTab) -> Unit = {}
 ) {
     val context = LocalContext.current
-    val requests = remember { mutableStateListOf(*sampleRequests.toTypedArray()) }
+    val scope = rememberCoroutineScope()
+    var requests by remember { mutableStateOf<List<BloodRequest>>(emptyList()) }
+    var loadError by remember { mutableStateOf<String?>(null) }
+    // Hidden from this feed only; the request stays in the database for everyone else
+    var dismissed by remember { mutableStateOf(setOf<String>()) }
     var showPostDialog by remember { mutableStateOf(false) }
+    var isPosting by remember { mutableStateOf(false) }
+    var postError by remember { mutableStateOf<String?>(null) }
     var filterUrgency by remember { mutableStateOf<UrgencyLevel?>(null) }
     var filterBloodType by remember { mutableStateOf("All blood types") }
 
+    DisposableEffect(Unit) {
+        val registration = RequestRepository.listen(
+            onChange = { requests = it; loadError = null },
+            onError = { loadError = it }
+        )
+        onDispose { registration.remove() }
+    }
+
     val filtered = requests.filter { req ->
+        req.id !in dismissed &&
         (filterUrgency == null || req.urgency == filterUrgency) &&
         (filterBloodType == "All blood types" || req.bloodType == filterBloodType)
     }.sortedWith(compareByDescending<BloodRequest> { it.urgency == UrgencyLevel.Urgent }
@@ -116,10 +135,20 @@ fun RequestsScreen(
         // Feed
         if (filtered.isEmpty()) {
             Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("No requests yet", color = Gray, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.height(6.dp))
-                    Text("Be the first to post a blood request.", color = Gray, fontSize = 13.sp)
+                Column(
+                    Modifier.padding(horizontal = 32.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    val error = loadError
+                    if (error != null) {
+                        Text("Couldn't load requests", color = Gray, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.height(6.dp))
+                        Text(error, color = UrgentRed, fontSize = 13.sp, textAlign = TextAlign.Center)
+                    } else {
+                        Text("No requests yet", color = Gray, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.height(6.dp))
+                        Text("Be the first to post a blood request.", color = Gray, fontSize = 13.sp)
+                    }
                 }
             }
         } else {
@@ -142,7 +171,7 @@ fun RequestsScreen(
                                 Toast.makeText(context, "No dialer found", Toast.LENGTH_SHORT).show()
                             }
                         },
-                        onDismiss = { requests.remove(req) }
+                        onDismiss = { dismissed = dismissed + req.id }
                     )
                 }
                 Spacer(Modifier.height(4.dp))
@@ -155,11 +184,34 @@ fun RequestsScreen(
 
     if (showPostDialog) {
         PostRequestDialog(
-            onDismiss = { showPostDialog = false },
-            onSubmit = { newRequest ->
-                requests.add(0, newRequest)
+            isPosting = isPosting,
+            errorMessage = postError,
+            onDismiss = {
                 showPostDialog = false
-                Toast.makeText(context, "Request posted!", Toast.LENGTH_SHORT).show()
+                postError = null
+            },
+            onSubmit = { newRequest ->
+                isPosting = true
+                postError = null
+                scope.launch {
+                    val result = RequestRepository.post(newRequest)
+                    isPosting = false
+                    when (result) {
+                        PostResult.Posted -> {
+                            showPostDialog = false
+                            Toast.makeText(context, "Request posted!", Toast.LENGTH_SHORT).show()
+                        }
+                        PostResult.Queued -> {
+                            showPostDialog = false
+                            Toast.makeText(
+                                context,
+                                "You're offline. The request will post when you reconnect.",
+                                Toast.LENGTH_LONG
+                            ).show()
+                        }
+                        is PostResult.Failed -> postError = result.message
+                    }
+                }
             }
         )
     }
@@ -373,7 +425,9 @@ private fun RequestCard(
 @Composable
 private fun PostRequestDialog(
     onDismiss: () -> Unit,
-    onSubmit: (BloodRequest) -> Unit
+    onSubmit: (BloodRequest) -> Unit,
+    isPosting: Boolean = false,
+    errorMessage: String? = null
 ) {
     var posterName by remember { mutableStateOf("") }
     var bloodType by remember { mutableStateOf("") }
@@ -389,9 +443,6 @@ private fun PostRequestDialog(
     val locationOk = location.isNotBlank()
     val contactOk = isValidPhNumber(contact)
     val allValid = nameOk && bloodOk && locationOk && contactOk
-
-    // Running counter for new IDs (simple; replace with backend ID in production)
-    val newId = remember { sampleRequests.size + 100 }
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
@@ -498,15 +549,19 @@ private fun PostRequestDialog(
 
                 Spacer(Modifier.height(8.dp))
 
+                if (errorMessage != null) {
+                    FormError(errorMessage, Modifier.padding(bottom = 8.dp))
+                }
+
                 FormButton(
-                    text = "Post Request",
+                    text = if (isPosting) "Posting…" else "Post Request",
                     color = UrgentRed,
+                    enabled = !isPosting,
                     onClick = {
                         submitted = true
                         if (allValid) {
                             onSubmit(
                                 BloodRequest(
-                                    id = newId,
                                     posterName = posterName.trim(),
                                     bloodType = bloodType,
                                     location = location.trim(),

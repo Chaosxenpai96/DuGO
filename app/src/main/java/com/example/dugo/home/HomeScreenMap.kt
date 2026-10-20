@@ -88,6 +88,9 @@ import androidx.core.graphics.createBitmap
 import androidx.core.graphics.toColorInt
 import androidx.core.net.toUri
 import com.example.dugo.R
+import com.example.dugo.auth.AuthRepository
+import com.example.dugo.location.currentLocation
+import com.example.dugo.location.hasLocationPermission
 import com.example.dugo.login.BLOOD_TYPES
 import com.example.dugo.login.Brand
 import com.google.android.gms.location.LocationServices
@@ -126,30 +129,11 @@ private const val TOWN_ZOOM = 12f
 private const val AREA_ZOOM = 14f
 private const val MAX_RADIUS_KM = 20
 
+/** ID of the signed-in user's own pin, which the sample donors (1-5) never use. */
+private const val SELF_DONOR_ID = -1
+
 private fun zoomForRadius(radiusKm: Double): Float =
     (14.6 - ln(radiusKm) / ln(2.0) * 0.95).toFloat()
-
-@SuppressLint("MissingPermission")
-private fun lastKnownLocation(context: Context): Pair<Double, Double>? {
-    val lm = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return null
-    return runCatching {
-        lm.getProviders(true)
-            .mapNotNull { lm.getLastKnownLocation(it) }
-            .maxByOrNull { it.time }
-            ?.let { it.latitude to it.longitude }
-    }.getOrNull()
-}
-
-/** Requests a fresh GPS fix, falling back to the last known location. */
-@SuppressLint("MissingPermission")
-private suspend fun currentLocation(context: Context): Pair<Double, Double>? =
-    withContext(Dispatchers.IO) {
-        runCatching {
-            val client = LocationServices.getFusedLocationProviderClient(context)
-            val token = CancellationTokenSource()
-            Tasks.await(client.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, token.token))
-        }.getOrNull()?.let { it.latitude to it.longitude } ?: lastKnownLocation(context)
-    }
 
 enum class HomeTab(val label: String, val icon: ImageVector) {
     Map("Map", Icons.Outlined.Place),
@@ -186,19 +170,33 @@ fun HomeScreenMap(
     var sheetMinimized by remember { mutableStateOf(false) }
     var usingMyLocation by remember { mutableStateOf(false) }
 
+    // The signed-in user's pin. Its position is the device's GPS fix; the saved
+    // profile position is used until the first fix arrives.
+    val profile = UserSession.profile
+    var myGps by remember {
+        mutableStateOf(
+            profile.latitude?.let { lat ->
+                profile.longitude?.let { lng -> lat to lng }
+            }
+        )
+    }
+    val isDonor = profile.role == "Blood Donor"
+
+    // Moves the user's own pin and remembers the position for next time
+    fun useOwnPosition(gps: Pair<Double, Double>) {
+        myGps = gps
+        AuthRepository.saveLocation(gps.first, gps.second)
+    }
+
     // Map camera starts focused on Dalaguete
     val cameraPositionState = rememberCameraPositionState {
         position = CameraPosition.fromLatLngZoom(LatLng(DALAGUETE_LAT, DALAGUETE_LNG), TOWN_ZOOM)
     }
 
     // Location permission
-    fun hasLocationPermission(): Boolean =
-        ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) ==
-                PackageManager.PERMISSION_GRANTED ||
-                ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) ==
-                PackageManager.PERMISSION_GRANTED
+    fun locationGranted(): Boolean = hasLocationPermission(context)
 
-    var granted by remember { mutableStateOf(hasLocationPermission()) }
+    var granted by remember { mutableStateOf(locationGranted()) }
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { result ->
@@ -236,6 +234,7 @@ fun HomeScreenMap(
             val gps = currentLocation(context) ?: return@LaunchedEffect
             origin = gps
             usingMyLocation = true
+            useOwnPosition(gps)
             cameraPositionState.animate(
                 CameraUpdateFactory.newLatLngZoom(LatLng(gps.first, gps.second), TOWN_ZOOM)
             )
@@ -252,6 +251,7 @@ fun HomeScreenMap(
                 if (gps != null) {
                     origin = gps
                     usingMyLocation = true
+                    useOwnPosition(gps)
                     cameraPositionState.animate(
                         CameraUpdateFactory.newLatLngZoom(LatLng(gps.first, gps.second), TOWN_ZOOM)
                     )
@@ -262,12 +262,32 @@ fun HomeScreenMap(
         }
     }
 
-    val visible = remember(donors, query, bloodFilter, areaFilter, dismissed, radiusKm, origin) {
+    // The signed-in donor's pin, shown alongside the sample donors
+    val selfPin = myGps?.takeIf { isDonor }?.let { (lat, lng) ->
+        Donor(
+            id = SELF_DONOR_ID,
+            name = profile.fullName,
+            bloodType = profile.bloodType,
+            availableToday = profile.availableToday,
+            area = profile.location.substringBefore(',').trim(),
+            phone = profile.contactNumber,
+            lat = lat,
+            lng = lng,
+            isSelf = true
+        )
+    }
+    val allDonors = remember(donors, selfPin) {
+        if (selfPin != null) donors + selfPin else donors
+    }
+
+    val visible = remember(allDonors, query, bloodFilter, areaFilter, dismissed, radiusKm, origin) {
         val type = if (bloodFilter == ALL_TYPES) null else bloodFilter
-        findNearestDonors(donors, type, origin.first, origin.second, radiusKm.toDouble())
+        findNearestDonors(allDonors, type, origin.first, origin.second, radiusKm.toDouble())
             .map { it.donor }
             .filter { it.id !in dismissed }
-            .filter { areaFilter == ALL_AREAS || it.area == areaFilter }
+            // The profile's location text may not match a barangay name, so the
+            // donor's own pin is never hidden by the area filter
+            .filter { areaFilter == ALL_AREAS || it.area == areaFilter || it.isSelf }
             .filter {
                 query.isBlank() ||
                         it.area.contains(query, ignoreCase = true) ||
@@ -802,7 +822,10 @@ private fun DonorCard(
             }
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
-                Text(donor.name, fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Ink)
+                Text(
+                    if (donor.isSelf) "${donor.name} (You)" else donor.name,
+                    fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Ink
+                )
                 Spacer(Modifier.height(4.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(

@@ -221,11 +221,12 @@ object AuthRepository {
     }
 
     /**
-     * Loads the signed-in user's saved profile into [UserSession]. A user with no
-     * saved profile yet (a first social sign-in) gets one written instead.
+     * Loads the signed-in user's saved profile into [UserSession]. Returns false
+     * when the user has no saved profile yet, which is the case for a first
+     * social sign-in that still has to pick a role.
      */
-    suspend fun loadProfile() {
-        val user = currentUser ?: return
+    suspend fun loadProfile(): Boolean {
+        val user = currentUser ?: return false
         val doc = try {
             FirebaseFirestore.getInstance()
                 .collection("users")
@@ -234,12 +235,9 @@ object AuthRepository {
                 .await()
         } catch (e: Exception) {
             Log.w(TAG, "Could not load the profile", e)
-            return
+            return false
         }
-        if (!doc.exists()) {
-            syncProfileToFirestore()
-            return
-        }
+        if (!doc.exists()) return false
         val p = UserSession.profile
         UserSession.profile = p.copy(
             fullName = doc.getString("fullName") ?: p.fullName,
@@ -250,8 +248,37 @@ object AuthRepository {
             role = doc.getString("role") ?: p.role,
             availableToday = doc.getBoolean("availableToday") ?: p.availableToday,
             totalDonations = doc.getLong("totalDonations")?.toInt() ?: p.totalDonations,
-            joinedDate = doc.getString("joinedDate") ?: p.joinedDate
+            joinedDate = doc.getString("joinedDate") ?: p.joinedDate,
+            latitude = doc.getDouble("latitude") ?: p.latitude,
+            longitude = doc.getDouble("longitude") ?: p.longitude
         )
+        return true
+    }
+
+    /**
+     * Completes a social sign-up. The account already exists, so this only
+     * saves the details the social provider didn't give: role and the rest.
+     */
+    suspend fun completeProfile(profile: UserProfile, extra: Map<String, Any> = emptyMap()) {
+        UserSession.profile = profile
+        syncProfileToFirestore(extra)
+    }
+
+    /**
+     * Saves the device's GPS position to the profile, which places the donor's pin
+     * on the map. Coordinates come straight from the device — no address lookup.
+     */
+    fun saveLocation(latitude: Double, longitude: Double) {
+        UserSession.profile = UserSession.profile.copy(
+            latitude = latitude,
+            longitude = longitude
+        )
+        val user = currentUser ?: return
+        FirebaseFirestore.getInstance()
+            .collection("users")
+            .document(user.uid)
+            .set(mapOf("latitude" to latitude, "longitude" to longitude), SetOptions.merge())
+            .addOnFailureListener { Log.w(TAG, "Could not save the location", it) }
     }
 
     /**
@@ -265,7 +292,7 @@ object AuthRepository {
     ) {
         val user = currentUser ?: return onComplete(false)
         val profile = UserSession.profile
-        val data = mapOf(
+        val data = mutableMapOf<String, Any>(
             "uid" to user.uid,
             "fullName" to profile.fullName,
             "username" to profile.username,
@@ -277,7 +304,10 @@ object AuthRepository {
             "totalDonations" to profile.totalDonations,
             "joinedDate" to profile.joinedDate,
             "email" to (user.email ?: "")
-        ) + extra
+        )
+        profile.latitude?.let { data["latitude"] = it }
+        profile.longitude?.let { data["longitude"] = it }
+        data.putAll(extra)
         FirebaseFirestore.getInstance()
             .collection("users")
             .document(user.uid)
