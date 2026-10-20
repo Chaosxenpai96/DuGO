@@ -69,9 +69,7 @@ service cloud.firestore {
       // ---------- messages ----------
       match /messages/{messageId} {
         function chatParticipants() {
-          return request.auth != null &&
-                 request.auth.uid in get(/databases/$(database)/documents/
-                     conversations/$(conversationId)).data.participantIds;
+          return request.auth != null && request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.participantIds;
         }
 
         allow read: if chatParticipants();
