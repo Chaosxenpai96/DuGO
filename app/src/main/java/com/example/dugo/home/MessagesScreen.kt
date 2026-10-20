@@ -321,6 +321,7 @@ private fun ChatScreen(conversation: Conversation, onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
     var messages by remember { mutableStateOf<List<Message>>(emptyList()) }
     var loadError by remember { mutableStateOf<String?>(null) }
+    var sendError by remember { mutableStateOf<String?>(null) }
     var draft by remember { mutableStateOf("") }
     var isSending by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
@@ -343,15 +344,20 @@ private fun ChatScreen(conversation: Conversation, onBack: () -> Unit) {
         val text = draft.trim()
         if (text.isBlank() || isSending) return
         isSending = true
+        sendError = null
         scope.launch {
-            MessageRepository.sendMessage(
+            val error = MessageRepository.sendMessage(
                 recipientUid = conversation.contact.uid,
                 recipientName = conversation.contact.name,
                 recipientBloodType = conversation.contact.bloodType,
                 recipientAvailable = conversation.contact.availableToday,
                 text = text
             )
-            draft = ""
+            if (error.isEmpty()) {
+                draft = ""
+            } else {
+                sendError = error
+            }
             isSending = false
         }
     }
@@ -447,44 +453,54 @@ private fun ChatScreen(conversation: Conversation, onBack: () -> Unit) {
         HorizontalDivider(color = Line)
 
         // Input bar
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .navigationBarsPadding()
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            OutlinedTextField(
-                value = draft,
-                onValueChange = { draft = it },
-                modifier = Modifier.weight(1f),
-                placeholder = { Text("Type a message…", color = Gray, fontSize = 14.sp) },
-                shape = RoundedCornerShape(24.dp),
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                keyboardActions = KeyboardActions(onSend = { send() }),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedContainerColor = Color(0xFFF7F8FA),
-                    unfocusedContainerColor = Color(0xFFF7F8FA),
-                    focusedBorderColor = Brand,
-                    unfocusedBorderColor = Line
+        Column {
+            if (sendError != null) {
+                Text(
+                    sendError!!,
+                    color = BubbleMe,
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
                 )
-            )
-            Spacer(Modifier.width(8.dp))
-            Box(
+            }
+            Row(
                 Modifier
-                    .size(48.dp)
-                    .clip(CircleShape)
-                    .background(if (draft.isNotBlank() && !isSending) BubbleMe else Line)
-                    .clickable(enabled = draft.isNotBlank() && !isSending) { send() },
-                contentAlignment = Alignment.Center
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(
-                    Icons.AutoMirrored.Outlined.Send,
-                    contentDescription = "Send",
-                    tint = Color.White,
-                    modifier = Modifier.size(20.dp)
+                OutlinedTextField(
+                    value = draft,
+                    onValueChange = { draft = it },
+                    modifier = Modifier.weight(1f),
+                    placeholder = { Text("Type a message…", color = Gray, fontSize = 14.sp) },
+                    shape = RoundedCornerShape(24.dp),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                    keyboardActions = KeyboardActions(onSend = { send() }),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedContainerColor = Color(0xFFF7F8FA),
+                        unfocusedContainerColor = Color(0xFFF7F8FA),
+                        focusedBorderColor = Brand,
+                        unfocusedBorderColor = Line
+                    )
                 )
+                Spacer(Modifier.width(8.dp))
+                Box(
+                    Modifier
+                        .size(48.dp)
+                        .clip(CircleShape)
+                        .background(if (draft.isNotBlank() && !isSending) BubbleMe else Line)
+                        .clickable(enabled = draft.isNotBlank() && !isSending) { send() },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.AutoMirrored.Outlined.Send,
+                        contentDescription = "Send",
+                        tint = Color.White,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
             }
         }
     }

@@ -100,6 +100,9 @@ object AppSettings {
     // App settings
     const val DEFAULT_RADIUS_KM = "default_radius_km"
 
+    /** The radius a fresh install starts with, before anything is saved. */
+    const val DEFAULT_RADIUS_KM_VALUE = 20f
+
     // Privacy
     const val SHOW_CONTACT = "show_contact"
     const val EXPORT_CONTACT = "export_contact"
@@ -387,7 +390,8 @@ fun AppSettingsScreen(onBack: () -> Unit) {
 
     var radiusKm by remember {
         mutableStateOf(
-            prefs.getFloat(AppSettings.DEFAULT_RADIUS_KM, 20f).coerceIn(1f, 20f)
+            prefs.getFloat(AppSettings.DEFAULT_RADIUS_KM, AppSettings.DEFAULT_RADIUS_KM_VALUE)
+                .coerceIn(1f, MAX_RADIUS_KM.toFloat())
         )
     }
 
@@ -405,8 +409,8 @@ fun AppSettingsScreen(onBack: () -> Unit) {
             onValueChangeFinished = {
                 prefs.edit().putFloat(AppSettings.DEFAULT_RADIUS_KM, radiusKm).apply()
             },
-            valueRange = 1f..20f,
-            steps = 18,
+            valueRange = 1f..MAX_RADIUS_KM.toFloat(),
+            steps = 19, // 1, 2, 3 ... 100 km
             colors = SliderDefaults.colors(
                 thumbColor = Brand,
                 activeTrackColor = Brand,
@@ -422,7 +426,7 @@ fun AppSettingsScreen(onBack: () -> Unit) {
         OutlinedButton(
             onClick = {
                 prefs.edit().remove(AppSettings.DEFAULT_RADIUS_KM).apply()
-                radiusKm = 20f
+                radiusKm = AppSettings.DEFAULT_RADIUS_KM_VALUE
                 Toast.makeText(context, "Search settings reset", Toast.LENGTH_SHORT).show()
             },
             modifier = Modifier.fillMaxWidth(),

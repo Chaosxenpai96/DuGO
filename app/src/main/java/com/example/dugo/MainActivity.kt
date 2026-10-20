@@ -287,7 +287,9 @@ class MainActivity : ComponentActivity() {
                                         contactNumber = form.contactNumber,
                                         availableToday = form.role == "Blood Donor",
                                         totalDonations = 0,
-                                        joinedDate = joinedDate()
+                                        joinedDate = joinedDate(),
+                                        latitude = form.latitude,
+                                        longitude = form.longitude
                                     )
                                 )
                                 isAuthLoading = false

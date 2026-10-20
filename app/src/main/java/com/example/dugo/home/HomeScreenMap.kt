@@ -82,6 +82,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -128,7 +129,9 @@ private const val ALL_AREAS = "All areas"
 
 private const val TOWN_ZOOM = 12f
 private const val AREA_ZOOM = 14f
-private const val MAX_RADIUS_KM = 100
+
+/** How far the donor search reaches. The map and the settings screen share this. */
+const val MAX_RADIUS_KM = 100
 
 /** ID of the signed-in user's own pin, which the sample donors (1-5) never use. */
 private const val SELF_DONOR_ID = -1
@@ -163,7 +166,7 @@ fun HomeScreenMap(
     var showAll by remember { mutableStateOf(false) }
     var radiusKm by remember {
         val saved = AppSettings.prefs(context)
-            .getFloat(AppSettings.DEFAULT_RADIUS_KM, MAX_RADIUS_KM.toFloat())
+            .getFloat(AppSettings.DEFAULT_RADIUS_KM, AppSettings.DEFAULT_RADIUS_KM_VALUE)
         mutableStateOf(saved.coerceIn(1f, MAX_RADIUS_KM.toFloat()))
     }
     var filtersMinimized by remember { mutableStateOf(false) }
@@ -284,7 +287,8 @@ fun HomeScreenMap(
             phone = profile.contactNumber,
             lat = lat,
             lng = lng,
-            isSelf = true
+            isSelf = true,
+            region = regionForLocation(profile.location)
         )
     }
     val allDonors = remember(donors, liveDonors, selfPin) {
@@ -301,7 +305,7 @@ fun HomeScreenMap(
             .filter { it.id !in dismissed }
             // The profile's location text may not match a barangay name, so the
             // donor's own pin is never hidden by the area filter
-            .filter { areaFilter == ALL_AREAS || it.area == areaFilter || it.isSelf }
+            .filter { areaFilter == ALL_AREAS || it.region == areaFilter || it.isSelf }
             .filter {
                 query.isBlank() ||
                         it.area.contains(query, ignoreCase = true) ||
@@ -884,6 +888,16 @@ private fun DonorCard(
                         if (donor.availableToday) "Available today" else "Available on request",
                         color = if (donor.availableToday) Green else Gray,
                         fontSize = 12.sp, fontWeight = FontWeight.Medium
+                    )
+                }
+                if (donor.area.isNotBlank()) {
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        donor.area,
+                        color = Gray,
+                        fontSize = 12.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
             }

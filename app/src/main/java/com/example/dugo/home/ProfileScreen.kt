@@ -291,6 +291,8 @@ fun ProfileScreen(
             onSave = { updated ->
                 UserSession.profile = updated
                 showEditDialog = false
+                // Keep the server copy in step with what the profile shows
+                com.example.dugo.auth.AuthRepository.syncProfileToFirestore()
             }
         )
     }

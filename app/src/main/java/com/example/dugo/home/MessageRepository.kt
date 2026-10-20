@@ -2,6 +2,7 @@ package com.example.dugo.home
 
 import android.util.Log
 import com.example.dugo.auth.AuthRepository
+import com.google.firebase.firestore.DocumentReference
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreException
@@ -81,25 +82,31 @@ object MessageRepository {
         val myUid = AuthRepository.currentUser?.uid ?: return ""
         val id = conversationId(myUid, recipientUid)
         val doc = conversations.document(id)
-        if (!doc.get().await().exists()) {
-            doc.set(
-                mapOf(
-                    "participantIds" to listOf(myUid, recipientUid).sorted(),
-                    "participantNames" to mapOf(
-                        myUid to UserSession.profile.fullName,
-                        recipientUid to recipientName
-                    ),
-                    "participantBloodTypes" to mapOf(
-                        myUid to UserSession.profile.bloodType,
-                        recipientUid to recipientBloodType
-                    ),
-                    "participantAvailable" to mapOf(
-                        myUid to UserSession.profile.availableToday,
-                        recipientUid to recipientAvailable
-                    ),
-                    "unreadFor" to emptyList<String>()
-                )
-            ).await()
+        try {
+            if (!doc.get().await().exists()) {
+                doc.set(
+                    mapOf(
+                        "participantIds" to listOf(myUid, recipientUid).sorted(),
+                        "participantNames" to mapOf(
+                            myUid to UserSession.profile.fullName,
+                            recipientUid to recipientName
+                        ),
+                        "participantBloodTypes" to mapOf(
+                            myUid to UserSession.profile.bloodType,
+                            recipientUid to recipientBloodType
+                        ),
+                        "participantAvailable" to mapOf(
+                            myUid to UserSession.profile.availableToday,
+                            recipientUid to recipientAvailable
+                        ),
+                        "unreadCounts" to emptyMap<String, Int>()
+                    )
+                ).await()
+            }
+        } catch (e: Exception) {
+            // A denied read doesn't stop the conversation from being used: the
+            // send that follows writes the same document.
+            Log.w(TAG, "Could not prepare the conversation", e)
         }
         return id
     }
@@ -115,43 +122,73 @@ object MessageRepository {
         recipientBloodType: String,
         recipientAvailable: Boolean,
         text: String
-    ) {
-        val myUid = AuthRepository.currentUser?.uid ?: return
+    ): String {
+        val myUid = AuthRepository.currentUser?.uid ?: return "Sign in to send a message."
         val myName = UserSession.profile.fullName
         val id = conversationId(myUid, recipientUid)
         val now = System.currentTimeMillis()
 
-        val message = mapOf(
-            "senderUid" to myUid,
-            "senderName" to myName,
-            "text" to text.trim(),
-            "sentAt" to now
-        )
-        conversations.document(id).collection("messages").add(message).await()
+        // The conversation document goes first: the rules check that the sender
+        // is one of its participants, so it has to exist before the message.
+        val doc = conversations.document(id)
+        try {
+            val current = readUnreadCounts(doc)
+            val unreadCounts = current + (recipientUid to ((current[recipientUid] ?: 0) + 1))
 
-        val summary = mapOf(
-            "participantIds" to listOf(myUid, recipientUid).sorted(),
-            "participantNames" to mapOf(myUid to myName, recipientUid to recipientName),
-            "participantBloodTypes" to mapOf(
-                myUid to UserSession.profile.bloodType,
-                recipientUid to recipientBloodType
-            ),
-            "participantAvailable" to mapOf(myUid to UserSession.profile.availableToday, recipientUid to recipientAvailable),
-            "lastMessageAt" to now,
-            "lastMessageText" to text.trim(),
-            "unreadFor" to com.google.firebase.firestore.FieldValue.arrayUnion(recipientUid)
-        )
-        conversations.document(id).set(summary, com.google.firebase.firestore.SetOptions.merge()).await()
+            val summary = mapOf(
+                "participantIds" to listOf(myUid, recipientUid).sorted(),
+                "participantNames" to mapOf(myUid to myName, recipientUid to recipientName),
+                "participantBloodTypes" to mapOf(
+                    myUid to UserSession.profile.bloodType,
+                    recipientUid to recipientBloodType
+                ),
+                "participantAvailable" to mapOf(myUid to UserSession.profile.availableToday, recipientUid to recipientAvailable),
+                "lastMessageAt" to now,
+                "lastMessageText" to text.trim(),
+                "unreadCounts" to unreadCounts
+            )
+            doc.set(summary, com.google.firebase.firestore.SetOptions.merge()).await()
+
+            val message = mapOf(
+                "senderUid" to myUid,
+                "senderName" to myName,
+                "text" to text.trim(),
+                "sentAt" to now
+            )
+            doc.collection("messages").add(message).await()
+            return ""
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not send the message", e)
+            return friendlyMessage(e)
+        }
     }
 
     /** Marks a conversation as read by the signed-in user. */
     suspend fun markRead(conversationId: String) {
         val myUid = AuthRepository.currentUser?.uid ?: return
         val doc = conversations.document(conversationId)
-        // arrayRemove on a field that isn't there yet fails, so write it first
-        if (!doc.get().await().exists()) return
-        doc.update("unreadFor", com.google.firebase.firestore.FieldValue.arrayRemove(myUid)).await()
+        try {
+            if (!doc.get().await().exists()) return
+            val counts = readUnreadCounts(doc)
+            if (counts[myUid] == null || counts[myUid] == 0) return
+            doc.update("unreadCounts", counts + (myUid to 0)).await()
+        } catch (e: Exception) {
+            // Not being able to clear the badge shouldn't break the screen.
+            Log.w(TAG, "Could not mark the conversation as read", e)
+        }
     }
+
+    /** The unread counts saved on a conversation, keyed by uid. */
+    private suspend fun readUnreadCounts(doc: DocumentReference): Map<String, Int> =
+        doc.get().await().get("unreadCounts")
+            ?.let { it as? Map<*, *> }
+            ?.entries
+            ?.mapNotNull { (k, v) ->
+                val count = (v as? Number)?.toInt() ?: return@mapNotNull null
+                k.toString() to count
+            }
+            ?.toMap()
+            ?: emptyMap()
 
     private fun toConversation(doc: DocumentSnapshot): Conversation? {
         val names = doc.get("participantNames") as? Map<*, *>
@@ -168,7 +205,7 @@ object MessageRepository {
         val otherAvailable = available?.get(otherUid) as? Boolean ?: true
         val lastText = doc.getString("lastMessageText").orEmpty()
         val lastAt = doc.getLong("lastMessageAt") ?: 0L
-        val unread = (doc.get("unreadFor") as? List<*>).orEmpty().count { it.toString() == myUid }
+        val unread = ((doc.get("unreadCounts") as? Map<*, *>)?.get(myUid) as? Number)?.toInt() ?: 0
         return Conversation(
             id = doc.id,
             contact = Donor(
@@ -190,15 +227,14 @@ object MessageRepository {
 
     private fun toMessage(doc: DocumentSnapshot): Message? {
         val text = doc.getString("text") ?: return null
-        val myUid = AuthRepository.currentUser?.uid
-        val readBy = doc.get("readBy") as? List<*> ?: emptyList<Any>()
         return Message(
             id = doc.id.hashCode(),
             senderUid = doc.getString("senderUid").orEmpty(),
             receiverUid = "",
             text = text,
             sentAt = doc.getLong("sentAt") ?: 0L,
-            isRead = myUid == null || readBy.contains(myUid)
+            // The unread badge lives on the conversation, not on each message
+            isRead = true
         )
     }
 

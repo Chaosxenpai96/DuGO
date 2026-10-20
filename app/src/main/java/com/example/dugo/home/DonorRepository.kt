@@ -51,16 +51,18 @@ object DonorRepository {
         val lat = doc.getDouble("latitude") ?: return null
         val lng = doc.getDouble("longitude") ?: return null
         val uid = doc.getString("uid") ?: doc.id
+        val location = doc.getString("location").orEmpty()
         return Donor(
             id = uid.hashCode(),
             name = doc.getString("fullName")?.takeIf { it.isNotBlank() } ?: "Donor",
             bloodType = doc.getString("bloodType")?.takeIf { it.isNotBlank() } ?: "—",
             availableToday = doc.getBoolean("availableToday") ?: true,
-            area = doc.getString("location")?.substringBefore(',')?.trim().orEmpty(),
+            area = location.substringBefore(',').trim(),
             phone = doc.getString("contactNumber").orEmpty(),
             lat = lat,
             lng = lng,
-            uid = uid
+            uid = uid,
+            region = regionForLocation(location)
         )
     }
 }

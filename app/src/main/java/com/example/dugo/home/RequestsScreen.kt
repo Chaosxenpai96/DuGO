@@ -67,6 +67,7 @@ import com.example.dugo.login.FormButton
 import com.example.dugo.login.FormError
 import com.example.dugo.login.FormLabel
 import com.example.dugo.login.FormTextField
+import com.example.dugo.login.AutoLocationField
 import com.example.dugo.login.isValidPhNumber
 import kotlinx.coroutines.launch
 
@@ -186,6 +187,8 @@ fun RequestsScreen(
         PostRequestDialog(
             isPosting = isPosting,
             errorMessage = postError,
+            initialName = UserSession.profile.fullName,
+            initialLocation = UserSession.profile.location,
             onDismiss = {
                 showPostDialog = false
                 postError = null
@@ -427,14 +430,17 @@ private fun PostRequestDialog(
     onDismiss: () -> Unit,
     onSubmit: (BloodRequest) -> Unit,
     isPosting: Boolean = false,
-    errorMessage: String? = null
+    errorMessage: String? = null,
+    /** The signed-in user's saved details, used to fill the form in. */
+    initialName: String = "",
+    initialLocation: String = ""
 ) {
-    var posterName by remember { mutableStateOf("") }
+    var posterName by remember { mutableStateOf(initialName) }
     var bloodType by remember { mutableStateOf("") }
-    var location by remember { mutableStateOf("") }
+    var location by remember { mutableStateOf(initialLocation) }
     var hospital by remember { mutableStateOf("") }
     var notes by remember { mutableStateOf("") }
-    var contact by remember { mutableStateOf("") }
+    var contact by remember { mutableStateOf(UserSession.profile.contactNumber) }
     var urgency by remember { mutableStateOf(UrgencyLevel.Normal) }
     var submitted by remember { mutableStateOf(false) }
 
@@ -520,6 +526,14 @@ private fun PostRequestDialog(
                     placeholder = "e.g. Poblacion, Cebu City",
                     leadingIcon = Icons.Outlined.LocationOn,
                     error = if (submitted && !locationOk) "Please enter a location" else null
+                )
+
+                // Fills the location in from the device
+                AutoLocationField(
+                    location = location,
+                    onLocationChange = { location = it },
+                    onPicked = { },
+                    autoStart = false
                 )
 
                 FormLabel("Hospital / Clinic (optional)")
