@@ -221,11 +221,12 @@ object AuthRepository {
     }
 
     /**
-     * Loads the signed-in user's saved profile into [UserSession]. A user with no
-     * saved profile yet (a first social sign-in) gets one written instead.
+     * Loads the signed-in user's saved profile into [UserSession]. Returns false
+     * when the user has no saved profile yet, which is the case for a first
+     * social sign-in that still has to pick a role.
      */
-    suspend fun loadProfile() {
-        val user = currentUser ?: return
+    suspend fun loadProfile(): Boolean {
+        val user = currentUser ?: return false
         val doc = try {
             FirebaseFirestore.getInstance()
                 .collection("users")
@@ -234,12 +235,9 @@ object AuthRepository {
                 .await()
         } catch (e: Exception) {
             Log.w(TAG, "Could not load the profile", e)
-            return
+            return false
         }
-        if (!doc.exists()) {
-            syncProfileToFirestore()
-            return
-        }
+        if (!doc.exists()) return false
         val p = UserSession.profile
         UserSession.profile = p.copy(
             fullName = doc.getString("fullName") ?: p.fullName,
@@ -254,6 +252,16 @@ object AuthRepository {
             latitude = doc.getDouble("latitude") ?: p.latitude,
             longitude = doc.getDouble("longitude") ?: p.longitude
         )
+        return true
+    }
+
+    /**
+     * Completes a social sign-up. The account already exists, so this only
+     * saves the details the social provider didn't give: role and the rest.
+     */
+    suspend fun completeProfile(profile: UserProfile, extra: Map<String, Any> = emptyMap()) {
+        UserSession.profile = profile
+        syncProfileToFirestore(extra)
     }
 
     /**

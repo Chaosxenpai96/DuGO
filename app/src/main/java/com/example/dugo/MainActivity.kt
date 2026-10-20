@@ -24,6 +24,7 @@ import com.example.dugo.home.ProfileScreen
 import com.example.dugo.home.RequestsScreen
 import com.example.dugo.home.UserProfile
 import com.example.dugo.home.UserSession
+import com.example.dugo.login.CompleteProfileScreen
 import com.example.dugo.login.LoginScreen
 import com.example.dugo.login.RegisterDonor
 import com.example.dugo.login.RegisterSeeker
@@ -34,7 +35,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-enum class Screen { Login, RoleSelect, RegisterDonor, RegisterSeeker, Home, Requests, Messages, Profile }
+enum class Screen { Login, RoleSelect, RegisterDonor, RegisterSeeker, CompleteProfile, Home, Requests, Messages, Profile }
 
 /** "October 2026" — the month a new account joined, as shown on the profile. */
 private fun joinedDate(): String = SimpleDateFormat("MMMM yyyy", Locale.getDefault()).format(Date())
@@ -101,6 +102,21 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
+                /**
+                 * Finishes a sign-in that has no profile yet. A saved profile goes
+                 * straight to the app; a first Google or Facebook sign-in is asked
+                 * whether they're a donor or a seeker.
+                 */
+                suspend fun afterSignIn() {
+                    val hasProfile = AuthRepository.loadProfile()
+                    isAuthLoading = false
+                    if (hasProfile) {
+                        onAuthSuccess()
+                    } else {
+                        screen = Screen.CompleteProfile
+                    }
+                }
+
                 // An error belongs to the screen that showed it
                 LaunchedEffect(screen) { authError = null }
 
@@ -112,8 +128,7 @@ class MainActivity : ComponentActivity() {
                     scope.launch {
                         when (val result = AuthRepository.signInWithFacebook(facebookToken)) {
                             is AuthResult.Success -> {
-                                AuthRepository.loadProfile()
-                                onAuthSuccess()
+                                afterSignIn()
                             }
                             is AuthResult.Failure -> {
                                 isAuthLoading = false
@@ -133,6 +148,11 @@ class MainActivity : ComponentActivity() {
                 BackHandler(enabled = screen != Screen.Login && screen != Screen.Home) {
                     screen = when (screen) {
                         Screen.RegisterDonor, Screen.RegisterSeeker -> Screen.RoleSelect
+                        // Signing out is the way out of the role question
+                        Screen.CompleteProfile -> {
+                            AuthRepository.signOut()
+                            Screen.Login
+                        }
                         in secondaryScreens -> Screen.Home
                         else -> Screen.Login
                     }
@@ -147,13 +167,14 @@ class MainActivity : ComponentActivity() {
                             authError = null
                             scope.launch {
                                 val result = AuthRepository.signInWithEmail(user, password)
-                                isAuthLoading = false
                                 when (result) {
                                     is AuthResult.Success -> {
-                                        AuthRepository.loadProfile()
-                                        onAuthSuccess()
+                                        afterSignIn()
                                     }
-                                    is AuthResult.Failure -> authError = result.message
+                                    is AuthResult.Failure -> {
+                                        isAuthLoading = false
+                                        authError = result.message
+                                    }
                                 }
                             }
                         },
@@ -163,8 +184,7 @@ class MainActivity : ComponentActivity() {
                             scope.launch {
                                 when (val result = AuthRepository.signInWithGoogle(idToken)) {
                                     is AuthResult.Success -> {
-                                        AuthRepository.loadProfile()
-                                        onAuthSuccess()
+                                        afterSignIn()
                                     }
                                     is AuthResult.Failure -> {
                                         isAuthLoading = false
@@ -245,6 +265,32 @@ class MainActivity : ComponentActivity() {
                                 form.password,
                                 mapOf("notes" to form.notes)
                             )
+                        }
+                    )
+
+                    Screen.CompleteProfile -> CompleteProfileScreen(
+                        suggestedName = UserSession.profile.fullName,
+                        errorMessage = authError,
+                        isSubmitting = isAuthLoading,
+                        onSubmit = { form ->
+                            isAuthLoading = true
+                            authError = null
+                            scope.launch {
+                                val current = UserSession.profile
+                                AuthRepository.completeProfile(
+                                    current.copy(
+                                        role = form.role,
+                                        bloodType = form.bloodType,
+                                        location = form.location,
+                                        contactNumber = form.contactNumber,
+                                        availableToday = form.role == "Blood Donor",
+                                        totalDonations = 0,
+                                        joinedDate = joinedDate()
+                                    )
+                                )
+                                isAuthLoading = false
+                                onAuthSuccess()
+                            }
                         }
                     )
 
