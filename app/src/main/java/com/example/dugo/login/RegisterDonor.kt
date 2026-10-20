@@ -49,7 +49,9 @@ private enum class Availability { Anytime, SpecificDates }
 @Composable
 fun RegisterDonor(
     onBack: () -> Unit = {},
-    onSubmit: (DonorForm) -> Unit = {}
+    onSubmit: (DonorForm) -> Unit = {},
+    errorMessage: String? = null,
+    isSubmitting: Boolean = false
 ) {
     var fullName by remember { mutableStateOf("") }
     var bloodType by remember { mutableStateOf("") }
@@ -175,9 +177,14 @@ fun RegisterDonor(
             Spacer(Modifier.padding(bottom = 16.dp))
         }
 
+        if (errorMessage != null) {
+            FormError(errorMessage, Modifier.padding(horizontal = 16.dp).padding(top = 8.dp))
+        }
+
         FormButton(
-            text = "Create Account",
+            text = if (isSubmitting) "Creating account…" else "Create Account",
             color = Color(0xFFDC4660),
+            enabled = !isSubmitting,
             onClick = {
                 submitted = true
                 if (allValid) {

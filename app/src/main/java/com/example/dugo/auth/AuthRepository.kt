@@ -2,11 +2,13 @@ package com.example.dugo.auth
 
 import android.content.Context
 import android.util.Log
+import com.example.dugo.home.UserProfile
 import com.example.dugo.home.UserSession
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.GoogleAuthProvider
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.SetOptions
 import kotlinx.coroutines.tasks.await
 
 /** Where a sign-in came from — used for provider-specific handling and UI messaging. */
@@ -37,9 +39,22 @@ object AuthRepository {
     // Email / password
     // -----------------------------------------------------------------------
 
+    /**
+     * Accounts register with a username, but Firebase Auth needs an email, so the
+     * username is mapped onto this reserved domain. It never receives mail, which
+     * means password-reset emails can't reach username accounts.
+     */
+    private const val USERNAME_EMAIL_DOMAIN = "users.dugo.example.com"
+
+    /** Turns what the user typed (a username or a real email) into the Auth email. */
+    fun loginEmail(input: String): String {
+        val trimmed = input.trim()
+        return if ("@" in trimmed) trimmed else "${trimmed.lowercase()}@$USERNAME_EMAIL_DOMAIN"
+    }
+
     suspend fun signInWithEmail(email: String, password: String): AuthResult = try {
         val user = FirebaseAuth.getInstance()
-            .signInWithEmailAndPassword(email.trim(), password)
+            .signInWithEmailAndPassword(loginEmail(email), password)
             .await()
             .user
         if (user != null) {
@@ -52,28 +67,33 @@ object AuthRepository {
         AuthResult.Failure(friendlyMessage(e))
     }
 
-    suspend fun registerWithEmail(
-        email: String,
+    /**
+     * Creates the account for [profile]'s username and saves the whole profile to
+     * Firestore. [extra] holds registration fields that [UserProfile] doesn't model.
+     */
+    suspend fun register(
+        profile: UserProfile,
         password: String,
-        fullName: String,
-        role: String
+        extra: Map<String, Any> = emptyMap()
     ): AuthResult = try {
         val user = FirebaseAuth.getInstance()
-            .createUserWithEmailAndPassword(email.trim(), password)
+            .createUserWithEmailAndPassword(loginEmail(profile.username), password)
             .await()
             .user
         if (user != null) {
             user.updateProfile(
                 com.google.firebase.auth.UserProfileChangeRequest.Builder()
-                    .setDisplayName(fullName)
+                    .setDisplayName(profile.fullName)
                     .build()
             ).await()
-            applyUserToSession(user, fullName = fullName, role = role)
+            UserSession.profile = profile
+            syncProfileToFirestore(extra)
             AuthResult.Success(AuthProvider.EMAIL, user)
         } else {
             AuthResult.Failure("Could not create the account. Please try again.")
         }
     } catch (e: Exception) {
+        Log.e(TAG, "Registration failed", e)
         AuthResult.Failure(friendlyMessage(e))
     }
 
@@ -184,7 +204,8 @@ object AuthRepository {
             fullName = fullName
                 ?: user.displayName?.takeIf { it.isNotBlank() }
                 ?: existing.fullName,
-            username = (user.email ?: user.uid).takeIf { it.isNotBlank() } ?: existing.username,
+            username = (user.email ?: user.displayName ?: user.uid)
+                .takeIf { it.isNotBlank() } ?: existing.username,
             bloodType = existing.bloodType,
             location = existing.location,
             contactNumber = user.phoneNumber ?: existing.contactNumber,
@@ -200,10 +221,48 @@ object AuthRepository {
     }
 
     /**
-     * Writes the profile to Firestore so the app has a server-side record.
+     * Loads the signed-in user's saved profile into [UserSession]. A user with no
+     * saved profile yet (a first social sign-in) gets one written instead.
+     */
+    suspend fun loadProfile() {
+        val user = currentUser ?: return
+        val doc = try {
+            FirebaseFirestore.getInstance()
+                .collection("users")
+                .document(user.uid)
+                .get()
+                .await()
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not load the profile", e)
+            return
+        }
+        if (!doc.exists()) {
+            syncProfileToFirestore()
+            return
+        }
+        val p = UserSession.profile
+        UserSession.profile = p.copy(
+            fullName = doc.getString("fullName") ?: p.fullName,
+            username = doc.getString("username") ?: p.username,
+            bloodType = doc.getString("bloodType") ?: p.bloodType,
+            location = doc.getString("location") ?: p.location,
+            contactNumber = doc.getString("contactNumber") ?: p.contactNumber,
+            role = doc.getString("role") ?: p.role,
+            availableToday = doc.getBoolean("availableToday") ?: p.availableToday,
+            totalDonations = doc.getLong("totalDonations")?.toInt() ?: p.totalDonations,
+            joinedDate = doc.getString("joinedDate") ?: p.joinedDate
+        )
+    }
+
+    /**
+     * Writes the profile to Firestore so the app has a server-side record. Merges,
+     * so fields this doesn't know about (like [extra] from registration) survive.
      * Failure is not fatal — sign-in still succeeds without it.
      */
-    fun syncProfileToFirestore(onComplete: (Boolean) -> Unit = {}) {
+    fun syncProfileToFirestore(
+        extra: Map<String, Any> = emptyMap(),
+        onComplete: (Boolean) -> Unit = {}
+    ) {
         val user = currentUser ?: return onComplete(false)
         val profile = UserSession.profile
         val data = mapOf(
@@ -214,13 +273,19 @@ object AuthRepository {
             "location" to profile.location,
             "contactNumber" to profile.contactNumber,
             "role" to profile.role,
+            "availableToday" to profile.availableToday,
+            "totalDonations" to profile.totalDonations,
+            "joinedDate" to profile.joinedDate,
             "email" to (user.email ?: "")
-        )
+        ) + extra
         FirebaseFirestore.getInstance()
             .collection("users")
             .document(user.uid)
-            .set(data)
-            .addOnCompleteListener { onComplete(it.isSuccessful) }
+            .set(data, SetOptions.merge())
+            .addOnCompleteListener {
+                if (!it.isSuccessful) Log.w(TAG, "Could not save the profile", it.exception)
+                onComplete(it.isSuccessful)
+            }
     }
 
     /** Turns Firebase exception text into something a user can act on. */
@@ -228,14 +293,16 @@ object AuthRepository {
         val raw = e.message.orEmpty()
         return when {
             raw.contains("email address is already in use", ignoreCase = true) ->
-                "That email is already registered. Try signing in instead."
+                "That username is already taken. Pick another one or sign in instead."
+            raw.contains("badly formatted", ignoreCase = true) ->
+                "Enter a valid username or email."
             raw.contains("password is invalid", ignoreCase = true) ||
                 raw.contains("wrong password", ignoreCase = true) ||
                 raw.contains("supplied auth credential", ignoreCase = true) ->
-                "Incorrect email or password."
+                "Incorrect username/email or password."
             raw.contains("no user record", ignoreCase = true) ||
                 raw.contains("user not found", ignoreCase = true) ->
-                "No account found for that email."
+                "No account found with that username or email."
             raw.contains("weak password", ignoreCase = true) ->
                 "Password is too weak. Use at least 6 characters."
             raw.contains("network", ignoreCase = true) ->

@@ -49,7 +49,7 @@ fun EmailField(value: String, onValueChange: (String) -> Unit, modifier: Modifie
         singleLine = true,
         shape = RoundedCornerShape(14.dp),
         colors = fieldColors(),
-        placeholder = { Text("Email or Phone Number", color = Placeholder, fontSize = 14.sp) },
+        placeholder = { Text("Username or Email", color = Placeholder, fontSize = 14.sp) },
         leadingIcon = { Icon(Icons.Outlined.Email, contentDescription = null, tint = TextDark) },
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email)
     )
