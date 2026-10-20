@@ -96,7 +96,8 @@ object MessageRepository {
                     "participantAvailable" to mapOf(
                         myUid to UserSession.profile.availableToday,
                         recipientUid to recipientAvailable
-                    )
+                    ),
+                    "unreadFor" to emptyList<String>()
                 )
             ).await()
         }
@@ -146,9 +147,10 @@ object MessageRepository {
     /** Marks a conversation as read by the signed-in user. */
     suspend fun markRead(conversationId: String) {
         val myUid = AuthRepository.currentUser?.uid ?: return
-        conversations.document(conversationId)
-            .update("unreadFor", com.google.firebase.firestore.FieldValue.arrayRemove(myUid))
-            .await()
+        val doc = conversations.document(conversationId)
+        // arrayRemove on a field that isn't there yet fails, so write it first
+        if (!doc.get().await().exists()) return
+        doc.update("unreadFor", com.google.firebase.firestore.FieldValue.arrayRemove(myUid)).await()
     }
 
     private fun toConversation(doc: DocumentSnapshot): Conversation? {
