@@ -13,7 +13,10 @@ data class UserProfile(
     val role: String,           // "Blood Donor" | "Blood Seeker" | "Admin"
     val availableToday: Boolean = true,
     val totalDonations: Int = 0,
-    val joinedDate: String = "October 2026"
+    val joinedDate: String = "October 2026",
+    // Set from the device's GPS when the donor opens the map — never geocoded.
+    val latitude: Double? = null,
+    val longitude: Double? = null
 )
 
 /** Singleton session — set this when the user logs in or registers. */

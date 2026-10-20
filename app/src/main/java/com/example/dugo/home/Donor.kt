@@ -10,7 +10,9 @@ data class Donor(
     val area: String,
     val phone: String,
     val lat: Double,
-    val lng: Double
+    val lng: Double,
+    /** True for the signed-in donor's own pin. */
+    val isSelf: Boolean = false
 )
 
 data class Area(val name: String, val lat: Double, val lng: Double)

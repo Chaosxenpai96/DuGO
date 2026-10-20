@@ -250,8 +250,27 @@ object AuthRepository {
             role = doc.getString("role") ?: p.role,
             availableToday = doc.getBoolean("availableToday") ?: p.availableToday,
             totalDonations = doc.getLong("totalDonations")?.toInt() ?: p.totalDonations,
-            joinedDate = doc.getString("joinedDate") ?: p.joinedDate
+            joinedDate = doc.getString("joinedDate") ?: p.joinedDate,
+            latitude = doc.getDouble("latitude") ?: p.latitude,
+            longitude = doc.getDouble("longitude") ?: p.longitude
         )
+    }
+
+    /**
+     * Saves the device's GPS position to the profile, which places the donor's pin
+     * on the map. Coordinates come straight from the device — no address lookup.
+     */
+    fun saveLocation(latitude: Double, longitude: Double) {
+        UserSession.profile = UserSession.profile.copy(
+            latitude = latitude,
+            longitude = longitude
+        )
+        val user = currentUser ?: return
+        FirebaseFirestore.getInstance()
+            .collection("users")
+            .document(user.uid)
+            .set(mapOf("latitude" to latitude, "longitude" to longitude), SetOptions.merge())
+            .addOnFailureListener { Log.w(TAG, "Could not save the location", it) }
     }
 
     /**
@@ -265,7 +284,7 @@ object AuthRepository {
     ) {
         val user = currentUser ?: return onComplete(false)
         val profile = UserSession.profile
-        val data = mapOf(
+        val data = mutableMapOf<String, Any>(
             "uid" to user.uid,
             "fullName" to profile.fullName,
             "username" to profile.username,
@@ -277,7 +296,10 @@ object AuthRepository {
             "totalDonations" to profile.totalDonations,
             "joinedDate" to profile.joinedDate,
             "email" to (user.email ?: "")
-        ) + extra
+        )
+        profile.latitude?.let { data["latitude"] = it }
+        profile.longitude?.let { data["longitude"] = it }
+        data.putAll(extra)
         FirebaseFirestore.getInstance()
             .collection("users")
             .document(user.uid)
