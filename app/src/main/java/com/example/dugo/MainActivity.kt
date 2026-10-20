@@ -8,6 +8,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -21,6 +22,7 @@ import com.example.dugo.home.HomeTab
 import com.example.dugo.home.MessagesScreen
 import com.example.dugo.home.ProfileScreen
 import com.example.dugo.home.RequestsScreen
+import com.example.dugo.home.UserProfile
 import com.example.dugo.home.UserSession
 import com.example.dugo.login.LoginScreen
 import com.example.dugo.login.RegisterDonor
@@ -28,8 +30,14 @@ import com.example.dugo.login.RegisterSeeker
 import com.example.dugo.login.RoleSelectScreen
 import com.example.dugo.ui.theme.DuGOTheme
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 enum class Screen { Login, RoleSelect, RegisterDonor, RegisterSeeker, Home, Requests, Messages, Profile }
+
+/** "October 2026" — the month a new account joined, as shown on the profile. */
+private fun joinedDate(): String = SimpleDateFormat("MMMM yyyy", Locale.getDefault()).format(Date())
 
 // Testing shortcut: only works in debug builds. Remove before releasing the app.
 private const val ADMIN_USER = "admin"
@@ -79,6 +87,23 @@ class MainActivity : ComponentActivity() {
                     screen = Screen.Home
                 }
 
+                fun register(profile: UserProfile, password: String, extra: Map<String, Any>) {
+                    isAuthLoading = true
+                    authError = null
+                    scope.launch {
+                        when (val result = AuthRepository.register(profile, password, extra)) {
+                            is AuthResult.Success -> onAuthSuccess()
+                            is AuthResult.Failure -> {
+                                isAuthLoading = false
+                                authError = result.message
+                            }
+                        }
+                    }
+                }
+
+                // An error belongs to the screen that showed it
+                LaunchedEffect(screen) { authError = null }
+
                 // Pick up a Facebook token that arrived through onActivityResult
                 val facebookToken = pendingFacebookToken.value
                 if (facebookToken != null) {
@@ -87,7 +112,7 @@ class MainActivity : ComponentActivity() {
                     scope.launch {
                         when (val result = AuthRepository.signInWithFacebook(facebookToken)) {
                             is AuthResult.Success -> {
-                                AuthRepository.syncProfileToFirestore()
+                                AuthRepository.loadProfile()
                                 onAuthSuccess()
                             }
                             is AuthResult.Failure -> {
@@ -125,7 +150,7 @@ class MainActivity : ComponentActivity() {
                                 isAuthLoading = false
                                 when (result) {
                                     is AuthResult.Success -> {
-                                        AuthRepository.syncProfileToFirestore()
+                                        AuthRepository.loadProfile()
                                         onAuthSuccess()
                                     }
                                     is AuthResult.Failure -> authError = result.message
@@ -138,7 +163,7 @@ class MainActivity : ComponentActivity() {
                             scope.launch {
                                 when (val result = AuthRepository.signInWithGoogle(idToken)) {
                                     is AuthResult.Success -> {
-                                        AuthRepository.syncProfileToFirestore()
+                                        AuthRepository.loadProfile()
                                         onAuthSuccess()
                                     }
                                     is AuthResult.Failure -> {
@@ -172,19 +197,50 @@ class MainActivity : ComponentActivity() {
 
                     Screen.RegisterDonor -> RegisterDonor(
                         onBack = { screen = Screen.RoleSelect },
+                        errorMessage = authError,
+                        isSubmitting = isAuthLoading,
                         onSubmit = { form ->
-                            // TODO: save the form to your backend / Firebase here
-                            roleLabel = "Blood Donor"
-                            screen = Screen.Home
+                            register(
+                                UserProfile(
+                                    fullName = form.fullName,
+                                    username = form.username,
+                                    bloodType = form.bloodType,
+                                    location = form.location,
+                                    contactNumber = form.contactNumber,
+                                    role = "Blood Donor",
+                                    availableToday = form.availableAnytime,
+                                    totalDonations = 0,
+                                    joinedDate = joinedDate()
+                                ),
+                                form.password,
+                                mapOf(
+                                    "availableAnytime" to form.availableAnytime,
+                                    "specificDates" to form.specificDates
+                                )
+                            )
                         }
                     )
 
                     Screen.RegisterSeeker -> RegisterSeeker(
                         onBack = { screen = Screen.RoleSelect },
+                        errorMessage = authError,
+                        isSubmitting = isAuthLoading,
                         onSubmit = { form ->
-                            // TODO: save the form to your backend / Firebase here
-                            roleLabel = "Blood Seeker"
-                            screen = Screen.Home
+                            register(
+                                UserProfile(
+                                    fullName = form.fullName,
+                                    username = form.username,
+                                    bloodType = form.bloodTypeNeeded,
+                                    location = form.location,
+                                    contactNumber = form.contactNumber,
+                                    role = "Blood Seeker",
+                                    availableToday = false,
+                                    totalDonations = 0,
+                                    joinedDate = joinedDate()
+                                ),
+                                form.password,
+                                mapOf("notes" to form.notes)
+                            )
                         }
                     )
 

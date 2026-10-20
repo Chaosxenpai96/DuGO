@@ -35,7 +35,9 @@ data class SeekerForm(
 @Composable
 fun RegisterSeeker(
     onBack: () -> Unit = {},
-    onSubmit: (SeekerForm) -> Unit = {}
+    onSubmit: (SeekerForm) -> Unit = {},
+    errorMessage: String? = null,
+    isSubmitting: Boolean = false
 ) {
     var fullName by remember { mutableStateOf("") }
     var bloodType by remember { mutableStateOf("") }
@@ -146,9 +148,14 @@ fun RegisterSeeker(
             Spacer(Modifier.padding(bottom = 16.dp))
         }
 
+        if (errorMessage != null) {
+            FormError(errorMessage, Modifier.padding(horizontal = 16.dp).padding(top = 8.dp))
+        }
+
         FormButton(
-            text = "Create Account",
+            text = if (isSubmitting) "Creating account…" else "Create Account",
             color = Color(0xFFF0002B),
+            enabled = !isSubmitting,
             onClick = {
                 submitted = true
                 if (allValid) {
