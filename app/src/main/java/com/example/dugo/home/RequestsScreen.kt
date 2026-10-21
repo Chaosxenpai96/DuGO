@@ -26,7 +26,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.Add
-import androidx.compose.material.icons.outlined.Call
+import androidx.compose.material.icons.outlined.ChatBubbleOutline
+import androidx.compose.material.icons.outlined.Phone
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.LocationOn
 import androidx.compose.material.icons.outlined.Notifications
@@ -96,6 +97,9 @@ fun RequestsScreen(
     var postError by remember { mutableStateOf<String?>(null) }
     var filterUrgency by remember { mutableStateOf<UrgencyLevel?>(null) }
     var filterBloodType by remember { mutableStateOf("All blood types") }
+    var selectedRequest by remember { mutableStateOf<BloodRequest?>(null) }
+    var showContactDialog by remember { mutableStateOf(false) }
+    var showChatScreen by remember { mutableStateOf(false) }
 
     DisposableEffect(Unit) {
         val registration = RequestRepository.listen(
@@ -164,19 +168,60 @@ fun RequestsScreen(
                     RequestCard(
                         request = req,
                         onContact = {
-                            runCatching {
-                                context.startActivity(
-                                    Intent(Intent.ACTION_DIAL, "tel:${req.contact}".toUri())
-                                )
-                            }.onFailure {
-                                Toast.makeText(context, "No dialer found", Toast.LENGTH_SHORT).show()
-                            }
+                            selectedRequest = req
+                            showContactDialog = true
                         },
                         onDismiss = { dismissed = dismissed + req.id }
                     )
                 }
                 Spacer(Modifier.height(4.dp))
             }
+        }
+
+        if (showContactDialog && selectedRequest != null) {
+            ContactDialog(
+                request = selectedRequest!!,
+                onDismiss = {
+                    showContactDialog = false
+                    selectedRequest = null
+                },
+                onCall = {
+                    runCatching {
+                        context.startActivity(
+                            Intent(Intent.ACTION_DIAL, "tel:${selectedRequest?.contact}".toUri())
+                        )
+                    }.onFailure {
+                        Toast.makeText(context, "No dialer found", Toast.LENGTH_SHORT).show()
+                    }
+                    showContactDialog = false
+                },
+                onMessage = {
+                    showContactDialog = false
+                    showChatScreen = true
+                }
+            )
+        }
+
+        if (showChatScreen) {
+            MessagesScreen(
+                selectedTab = HomeTab.Messages,
+                onTabSelected = onTabSelected,
+                onNotifications = onNotifications,
+                onProfile = onProfile,
+                startWith = Donor(
+                    id = 0,
+                    name = selectedRequest?.posterName ?: "Requester",
+                    bloodType = selectedRequest?.bloodType ?: "",
+                    availableToday = true,
+                    area = selectedRequest?.location ?: "",
+                    phone = selectedRequest?.contact ?: "",
+                    lat = 0.0,
+                    lng = 0.0,
+                    uid = selectedRequest?.id ?: ""
+                ),
+                onStarted = { showChatScreen = false }
+            )
+            return
         }
 
         HorizontalDivider(color = Line)
@@ -412,15 +457,30 @@ private fun RequestCard(
 
         Spacer(Modifier.height(14.dp))
 
-        Button(
-            onClick = onContact,
-            modifier = Modifier.fillMaxWidth().height(46.dp),
-            shape = RoundedCornerShape(14.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = UrgentRed, contentColor = Color.White)
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Icon(Icons.Outlined.Call, contentDescription = null, modifier = Modifier.size(16.dp))
-            Spacer(Modifier.width(8.dp))
-            Text("Respond to Request", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+            Button(
+                onClick = onContact,
+                modifier = Modifier.weight(1f).height(46.dp),
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = UrgentRed, contentColor = Color.White)
+            ) {
+                Icon(Icons.Outlined.Phone, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Call", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+            }
+            Button(
+                onClick = onContact,
+                modifier = Modifier.weight(1f).height(46.dp),
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Ink, contentColor = Color.White)
+            ) {
+                Icon(Icons.Outlined.ChatBubbleOutline, contentDescription = "Message", modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Message", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+            }
         }
     }
 }
