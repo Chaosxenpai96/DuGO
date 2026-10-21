@@ -26,7 +26,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.Add
-import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.Phone
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.LocationOn
@@ -492,7 +491,7 @@ private fun RequestCard(
                 shape = RoundedCornerShape(14.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = Ink, contentColor = Color.White)
             ) {
-                Icon(Icons.Outlined.ChatBubbleOutline, contentDescription = "Message", modifier = Modifier.size(16.dp))
+                Icon(Icons.Outlined.Add, contentDescription = "Message", modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(8.dp))
                 Text("Message", fontWeight = FontWeight.Bold, fontSize = 14.sp)
             }
@@ -556,7 +555,7 @@ private fun ContactDialog(
                     shape = RoundedCornerShape(14.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Ink, contentColor = Color.White)
                 ) {
-                    Icon(Icons.Outlined.ChatBubbleOutline, contentDescription = "Message", modifier = Modifier.size(18.dp))
+                    Icon(Icons.Outlined.Add, contentDescription = "Message", modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
                     Text("Send In-App Message", fontWeight = FontWeight.Bold, fontSize = 15.sp)
                 }
