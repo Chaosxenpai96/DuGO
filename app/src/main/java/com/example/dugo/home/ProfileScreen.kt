@@ -55,6 +55,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.dugo.login.Brand
+import com.example.dugo.login.BloodTypeDropdown
 
 private val Ink = Color(0xFF1B2230)
 private val Gray = Color(0xFF8A8F99)
