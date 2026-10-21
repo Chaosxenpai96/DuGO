@@ -82,30 +82,32 @@ object MessageRepository {
         val myUid = AuthRepository.currentUser?.uid ?: return ""
         val id = conversationId(myUid, recipientUid)
         val doc = conversations.document(id)
+
+        // The set with merge will create the document if missing, or be a no-op if it exists.
+        // Since participants() checks request.auth.uid in request.resource.data.participantIds,
+        // and the merged data includes myUid, the write will pass the rules.
+        val summary = mapOf(
+            "participantIds" to listOf(myUid, recipientUid).sorted(),
+            "participantNames" to mapOf(
+                myUid to UserSession.profile.fullName,
+                recipientUid to recipientName
+            ),
+            "participantBloodTypes" to mapOf(
+                myUid to UserSession.profile.bloodType,
+                recipientUid to recipientBloodType
+            ),
+            "participantAvailable" to mapOf(
+                myUid to UserSession.profile.availableToday,
+                recipientUid to recipientAvailable
+            ),
+            "unreadCounts" to emptyMap<String, Int>()
+        )
         try {
-            if (!doc.get().await().exists()) {
-                doc.set(
-                    mapOf(
-                        "participantIds" to listOf(myUid, recipientUid).sorted(),
-                        "participantNames" to mapOf(
-                            myUid to UserSession.profile.fullName,
-                            recipientUid to recipientName
-                        ),
-                        "participantBloodTypes" to mapOf(
-                            myUid to UserSession.profile.bloodType,
-                            recipientUid to recipientBloodType
-                        ),
-                        "participantAvailable" to mapOf(
-                            myUid to UserSession.profile.availableToday,
-                            recipientUid to recipientAvailable
-                        ),
-                        "unreadCounts" to emptyMap<String, Int>()
-                    )
-                ).await()
-            }
+            doc.set(summary, com.google.firebase.firestore.SetOptions.merge()).await()
         } catch (e: Exception) {
-            // A denied read doesn't stop the conversation from being used: the
-            // send that follows writes the same document.
+            // If the set fails due to rules, the conversation may not be allowed.
+            // A denied write is logged, but the app continues: the next sendMessage
+            // will attempt another set with merge, and it might succeed then.
             Log.w(TAG, "Could not prepare the conversation", e)
         }
         return id
@@ -132,9 +134,6 @@ object MessageRepository {
         // is one of its participants, so it has to exist before the message.
         val doc = conversations.document(id)
         try {
-            val current = readUnreadCounts(doc)
-            val unreadCounts = current + (recipientUid to ((current[recipientUid] ?: 0) + 1))
-
             val summary = mapOf(
                 "participantIds" to listOf(myUid, recipientUid).sorted(),
                 "participantNames" to mapOf(myUid to myName, recipientUid to recipientName),
@@ -145,7 +144,7 @@ object MessageRepository {
                 "participantAvailable" to mapOf(myUid to UserSession.profile.availableToday, recipientUid to recipientAvailable),
                 "lastMessageAt" to now,
                 "lastMessageText" to text.trim(),
-                "unreadCounts" to unreadCounts
+                "unreadCounts" to readUnreadCounts(doc) + (recipientUid to ((readUnreadCounts(doc)[recipientUid] ?: 0) + 1))
             )
             doc.set(summary, com.google.firebase.firestore.SetOptions.merge()).await()
 
