@@ -41,7 +41,10 @@ data class SocialProfileForm(
     val role: String,
     val bloodType: String,
     val location: String,
-    val contactNumber: String
+    val contactNumber: String,
+    /** Device GPS position, used for the donor's map pin. */
+    val latitude: Double? = null,
+    val longitude: Double? = null
 )
 
 /**
@@ -60,6 +63,7 @@ fun CompleteProfileScreen(
     var location by remember { mutableStateOf("") }
     var contact by remember { mutableStateOf("") }
     var submitted by remember { mutableStateOf(false) }
+    var pinLocation by remember { mutableStateOf<Pair<Double, Double>?>(null) }
 
     val bloodOk = bloodType.isNotEmpty()
     val locationOk = location.isNotBlank()
@@ -115,9 +119,16 @@ fun CompleteProfileScreen(
             FormTextField(
                 value = location,
                 onValueChange = { location = it },
-                placeholder = "e.g. Poblacion, Dalaguete",
+                placeholder = "e.g. Poblacion, Cebu City",
                 leadingIcon = Icons.Outlined.LocationOn,
                 error = if (submitted && !locationOk) "Please enter your location" else null
+            )
+
+            // Fills the location in from the device, and saves the pin
+            AutoLocationField(
+                location = location,
+                onLocationChange = { location = it },
+                onPicked = { pinLocation = it.latitude to it.longitude }
             )
 
             FormLabel("Contact Number")
@@ -148,7 +159,9 @@ fun CompleteProfileScreen(
                             role = if (isDonor) "Blood Donor" else "Blood Seeker",
                             bloodType = bloodType,
                             location = location.trim(),
-                            contactNumber = contact
+                            contactNumber = contact,
+                            latitude = pinLocation?.first,
+                            longitude = pinLocation?.second
                         )
                     )
                 }

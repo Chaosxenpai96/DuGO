@@ -1,8 +1,5 @@
 package com.example.dugo.login
 
-import android.Manifest
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -12,7 +9,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -21,9 +17,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.LocationOn
-import androidx.compose.material3.Icon
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Text
@@ -31,20 +24,15 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.dugo.location.currentLocation
-import com.example.dugo.location.hasLocationPermission
-import kotlinx.coroutines.launch
 
 data class DonorForm(
     val fullName: String,
@@ -80,58 +68,6 @@ fun RegisterDonor(
     var confirmPassword by remember { mutableStateOf("") }
     var submitted by remember { mutableStateOf(false) }
     var pinLocation by remember { mutableStateOf<Pair<Double, Double>?>(null) }
-    var isLocating by remember { mutableStateOf(false) }
-    var locationNote by remember { mutableStateOf<String?>(null) }
-
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val permissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { result ->
-        val allowed = result[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
-            result[Manifest.permission.ACCESS_COARSE_LOCATION] == true
-        if (allowed) {
-            locationNote = "Getting your location…"
-            scope.launch {
-                val gps = currentLocation(context)
-                if (gps != null) {
-                    pinLocation = gps
-                    locationNote = "Pin location saved"
-                } else {
-                    locationNote = "Couldn't get your location. Try again."
-                }
-                isLocating = false
-            }
-        } else {
-            locationNote = "Location permission denied"
-            isLocating = false
-        }
-    }
-
-    fun captureLocation() {
-        if (isLocating) return
-        isLocating = true
-        if (hasLocationPermission(context)) {
-            locationNote = "Getting your location…"
-            scope.launch {
-                val gps = currentLocation(context)
-                if (gps != null) {
-                    pinLocation = gps
-                    locationNote = "Pin location saved"
-                } else {
-                    locationNote = "Couldn't get your location. Try again."
-                }
-                isLocating = false
-            }
-        } else {
-            permissionLauncher.launch(
-                arrayOf(
-                    Manifest.permission.ACCESS_FINE_LOCATION,
-                    Manifest.permission.ACCESS_COARSE_LOCATION
-                )
-            )
-        }
-    }
 
     val nameOk = fullName.isNotBlank()
     val bloodOk = bloodType.isNotEmpty()
@@ -189,33 +125,11 @@ fun RegisterDonor(
             )
 
             // Puts the donor's pin on the map, using the device's GPS position
-            OutlinedButton(
-                onClick = { captureLocation() },
-                enabled = !isLocating,
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                shape = RoundedCornerShape(14.dp),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = Brand),
-                border = ButtonDefaults.outlinedButtonBorder(enabled = !isLocating)
-            ) {
-                Icon(Icons.Outlined.LocationOn, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    when {
-                        isLocating -> "Getting your location…"
-                        pinLocation != null -> "Pin location saved — tap to update"
-                        else -> "Use my current location for my pin"
-                    },
-                    fontSize = 14.sp, fontWeight = FontWeight.Bold
-                )
-            }
-            if (locationNote != null) {
-                Text(
-                    locationNote!!,
-                    color = if (pinLocation != null) Color(0xFF2E9E6B) else Color(0xFF8A8F99),
-                    fontSize = 12.sp,
-                    modifier = Modifier.padding(top = 6.dp, start = 4.dp)
-                )
-            }
+            AutoLocationField(
+                location = location,
+                onLocationChange = { location = it },
+                onPicked = { pinLocation = it.latitude to it.longitude }
+            )
 
             FormLabel("Contact Number")
             FormTextField(

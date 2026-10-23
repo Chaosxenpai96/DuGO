@@ -22,14 +22,14 @@ data class UserProfile(
 /** Singleton session — set this when the user logs in or registers. */
 object UserSession {
     var profile: UserProfile = UserProfile(
-        fullName = "Admin User",
-        username = "admin",
-        bloodType = "O+",
-        location = "Poblacion, Dalaguete",
-        contactNumber = "09171234567",
-        role = "Admin",
+        fullName = "",
+        username = "",
+        bloodType = "",
+        location = "",
+        contactNumber = "",
+        role = "Blood Donor",
         availableToday = true,
-        totalDonations = 3,
-        joinedDate = "October 2026"
+        totalDonations = 0,
+        joinedDate = ""
     )
 }

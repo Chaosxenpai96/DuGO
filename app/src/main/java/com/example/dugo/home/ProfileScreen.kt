@@ -55,6 +55,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.dugo.login.Brand
+import com.example.dugo.login.BloodTypeDropdown
 
 private val Ink = Color(0xFF1B2230)
 private val Gray = Color(0xFF8A8F99)
@@ -291,6 +292,8 @@ fun ProfileScreen(
             onSave = { updated ->
                 UserSession.profile = updated
                 showEditDialog = false
+                // Keep the server copy in step with what the profile shows
+                com.example.dugo.auth.AuthRepository.syncProfileToFirestore()
             }
         )
     }
@@ -382,6 +385,7 @@ private fun EditProfileDialog(
     var fullName by remember { mutableStateOf(profile.fullName) }
     var location by remember { mutableStateOf(profile.location) }
     var contact by remember { mutableStateOf(profile.contactNumber) }
+    var bloodType by remember { mutableStateOf(profile.bloodType) }
 
     androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
         Box(
@@ -417,6 +421,14 @@ private fun EditProfileDialog(
 
                 Spacer(Modifier.height(12.dp))
 
+                Text("Blood Type", fontSize = 14.sp, fontWeight = FontWeight.Medium, color = Ink)
+                BloodTypeDropdown(
+                    selected = bloodType,
+                    onSelected = { bloodType = it }
+                )
+
+                Spacer(Modifier.height(12.dp))
+
                 androidx.compose.material3.OutlinedTextField(
                     value = contact,
                     onValueChange = { contact = it },
@@ -438,7 +450,7 @@ private fun EditProfileDialog(
                     }
                     Button(
                         onClick = {
-                            onSave(profile.copy(fullName = fullName, location = location, contactNumber = contact))
+                            onSave(profile.copy(fullName = fullName, location = location, contactNumber = contact, bloodType = bloodType))
                         },
                         modifier = Modifier.weight(1f),
                         shape = RoundedCornerShape(12.dp),

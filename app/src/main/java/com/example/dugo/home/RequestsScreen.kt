@@ -26,7 +26,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.Add
-import androidx.compose.material.icons.outlined.Call
+import androidx.compose.material.icons.outlined.Phone
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.LocationOn
 import androidx.compose.material.icons.outlined.Notifications
@@ -67,6 +67,7 @@ import com.example.dugo.login.FormButton
 import com.example.dugo.login.FormError
 import com.example.dugo.login.FormLabel
 import com.example.dugo.login.FormTextField
+import com.example.dugo.login.AutoLocationField
 import com.example.dugo.login.isValidPhNumber
 import kotlinx.coroutines.launch
 
@@ -95,6 +96,11 @@ fun RequestsScreen(
     var postError by remember { mutableStateOf<String?>(null) }
     var filterUrgency by remember { mutableStateOf<UrgencyLevel?>(null) }
     var filterBloodType by remember { mutableStateOf("All blood types") }
+    var selectedRequest by remember { mutableStateOf<BloodRequest?>(null) }
+    var showContactDialog by remember { mutableStateOf(false) }
+    var showMessageDialog by remember { mutableStateOf(false) }
+    var isSendingMessage by remember { mutableStateOf(false) }
+    var messageError by remember { mutableStateOf<String?>(null) }
 
     DisposableEffect(Unit) {
         val registration = RequestRepository.listen(
@@ -163,19 +169,74 @@ fun RequestsScreen(
                     RequestCard(
                         request = req,
                         onContact = {
-                            runCatching {
-                                context.startActivity(
-                                    Intent(Intent.ACTION_DIAL, "tel:${req.contact}".toUri())
-                                )
-                            }.onFailure {
-                                Toast.makeText(context, "No dialer found", Toast.LENGTH_SHORT).show()
-                            }
+                            selectedRequest = req
+                            showContactDialog = true
                         },
                         onDismiss = { dismissed = dismissed + req.id }
                     )
                 }
                 Spacer(Modifier.height(4.dp))
             }
+        }
+
+        if (showContactDialog && selectedRequest != null) {
+            ContactDialog(
+                request = selectedRequest!!,
+                onDismiss = {
+                    showContactDialog = false
+                    selectedRequest = null
+                },
+                onCall = {
+                    runCatching {
+                        context.startActivity(
+                            Intent(Intent.ACTION_DIAL, "tel:${selectedRequest?.contact}".toUri())
+                        )
+                    }.onFailure {
+                        Toast.makeText(context, "No dialer found", Toast.LENGTH_SHORT).show()
+                    }
+                    showContactDialog = false
+                },
+                onMessage = {
+                    showContactDialog = false
+                    messageError = null
+                    showMessageDialog = true
+                }
+            )
+        }
+
+        if (showMessageDialog && selectedRequest != null) {
+            val request = selectedRequest!!
+            MessageComposerDialog(
+                recipientName = request.posterName,
+                isSending = isSendingMessage,
+                errorMessage = messageError,
+                onDismiss = {
+                    showMessageDialog = false
+                    selectedRequest = null
+                    messageError = null
+                },
+                onSend = { text ->
+                    isSendingMessage = true
+                    messageError = null
+                    scope.launch {
+                        val result = MessageRepository.sendMessage(
+                            recipientUid = request.posterUid,
+                            recipientName = request.posterName,
+                            recipientBloodType = request.bloodType,
+                            recipientAvailable = true,
+                            text = text
+                        )
+                        isSendingMessage = false
+                        if (result.isEmpty()) {
+                            showMessageDialog = false
+                            selectedRequest = null
+                            Toast.makeText(context, "Message sent!", Toast.LENGTH_SHORT).show()
+                        } else {
+                            messageError = result
+                        }
+                    }
+                }
+            )
         }
 
         HorizontalDivider(color = Line)
@@ -186,6 +247,8 @@ fun RequestsScreen(
         PostRequestDialog(
             isPosting = isPosting,
             errorMessage = postError,
+            initialName = UserSession.profile.fullName,
+            initialLocation = UserSession.profile.location,
             onDismiss = {
                 showPostDialog = false
                 postError = null
@@ -319,8 +382,7 @@ private fun FilterBar(
                 Icon(Icons.Filled.KeyboardArrowDown, contentDescription = null, tint = Ink, modifier = Modifier.size(16.dp))
             }
             DropdownMenu(expanded = bloodDropdownExpanded, onDismissRequest = { bloodDropdownExpanded = false }) {
-                listOf("All blood types") + BLOOD_TYPES.toList()
-                DropdownMenuItem(text = { Text("All types") }, onClick = {
+                DropdownMenuItem(text = { Text("All blood types") }, onClick = {
                     onBloodTypeSelected("All blood types"); bloodDropdownExpanded = false
                 })
                 BLOOD_TYPES.forEach { bt ->
@@ -409,15 +471,185 @@ private fun RequestCard(
 
         Spacer(Modifier.height(14.dp))
 
-        Button(
-            onClick = onContact,
-            modifier = Modifier.fillMaxWidth().height(46.dp),
-            shape = RoundedCornerShape(14.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = UrgentRed, contentColor = Color.White)
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Icon(Icons.Outlined.Call, contentDescription = null, modifier = Modifier.size(16.dp))
-            Spacer(Modifier.width(8.dp))
-            Text("Respond to Request", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+            Button(
+                onClick = onContact,
+                modifier = Modifier.weight(1f).height(46.dp),
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = UrgentRed, contentColor = Color.White)
+            ) {
+                Icon(Icons.Outlined.Phone, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Call", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+            }
+            Button(
+                onClick = onContact,
+                modifier = Modifier.weight(1f).height(46.dp),
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Ink, contentColor = Color.White)
+            ) {
+                Icon(Icons.Outlined.Add, contentDescription = "Message", modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Message", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ContactDialog(
+    request: BloodRequest,
+    onDismiss: () -> Unit,
+    onCall: () -> Unit,
+    onMessage: () -> Unit
+) {
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(24.dp),
+            color = Color.White,
+            shadowElevation = 16.dp
+        ) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(20.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        request.posterName,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Ink,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Icon(
+                        Icons.Outlined.Close,
+                        contentDescription = "Close",
+                        tint = Gray,
+                        modifier = Modifier.size(22.dp).clickable(onClick = onDismiss)
+                    )
+                }
+                Spacer(Modifier.height(4.dp))
+                Text("How would you like to contact the donor?", color = Gray, fontSize = 13.sp)
+                Spacer(Modifier.height(18.dp))
+
+                Button(
+                    onClick = onCall,
+                    modifier = Modifier.fillMaxWidth().height(50.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = UrgentRed, contentColor = Color.White)
+                ) {
+                    Icon(Icons.Outlined.Phone, contentDescription = "Call", modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Call via Phone", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                }
+
+                Spacer(Modifier.height(10.dp))
+
+                Button(
+                    onClick = onMessage,
+                    modifier = Modifier.fillMaxWidth().height(50.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Ink, contentColor = Color.White)
+                ) {
+                    Icon(Icons.Outlined.Add, contentDescription = "Message", modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Send In-App Message", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MessageComposerDialog(
+    recipientName: String,
+    isSending: Boolean,
+    errorMessage: String?,
+    onDismiss: () -> Unit,
+    onSend: (String) -> Unit
+) {
+    var text by remember { mutableStateOf("") }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(24.dp),
+            color = Color.White,
+            shadowElevation = 16.dp
+        ) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .imePadding()
+                    .padding(20.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "Message $recipientName",
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Ink,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Icon(
+                        Icons.Outlined.Close,
+                        contentDescription = "Close",
+                        tint = Gray,
+                        modifier = Modifier.size(22.dp).clickable(onClick = onDismiss)
+                    )
+                }
+                Spacer(Modifier.height(4.dp))
+                Text("They will see this in their Messages tab.", color = Gray, fontSize = 12.sp)
+                Spacer(Modifier.height(14.dp))
+
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    placeholder = { Text("Type your message…") },
+                    modifier = Modifier.fillMaxWidth().height(120.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Brand,
+                        unfocusedBorderColor = Line
+                    )
+                )
+
+                if (errorMessage != null) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(errorMessage, color = UrgentRed, fontSize = 12.sp)
+                }
+
+                Spacer(Modifier.height(14.dp))
+
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Button(
+                        onClick = onDismiss,
+                        modifier = Modifier.weight(1f).height(46.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFFF3F4F6),
+                            contentColor = Ink
+                        )
+                    ) {
+                        Text("Cancel", fontWeight = FontWeight.Bold)
+                    }
+                    Button(
+                        onClick = { onSend(text) },
+                        enabled = text.isNotBlank() && !isSending,
+                        modifier = Modifier.weight(1f).height(46.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Brand,
+                            contentColor = Color.White
+                        )
+                    ) {
+                        Text(if (isSending) "Sending…" else "Send", fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
         }
     }
 }
@@ -427,14 +659,17 @@ private fun PostRequestDialog(
     onDismiss: () -> Unit,
     onSubmit: (BloodRequest) -> Unit,
     isPosting: Boolean = false,
-    errorMessage: String? = null
+    errorMessage: String? = null,
+    /** The signed-in user's saved details, used to fill the form in. */
+    initialName: String = "",
+    initialLocation: String = ""
 ) {
-    var posterName by remember { mutableStateOf("") }
+    var posterName by remember { mutableStateOf(initialName) }
     var bloodType by remember { mutableStateOf("") }
-    var location by remember { mutableStateOf("") }
+    var location by remember { mutableStateOf(initialLocation) }
     var hospital by remember { mutableStateOf("") }
     var notes by remember { mutableStateOf("") }
-    var contact by remember { mutableStateOf("") }
+    var contact by remember { mutableStateOf(UserSession.profile.contactNumber) }
     var urgency by remember { mutableStateOf(UrgencyLevel.Normal) }
     var submitted by remember { mutableStateOf(false) }
 
@@ -517,16 +752,24 @@ private fun PostRequestDialog(
                 FormTextField(
                     value = location,
                     onValueChange = { location = it },
-                    placeholder = "e.g. Poblacion, Dalaguete",
+                    placeholder = "e.g. Poblacion, Cebu City",
                     leadingIcon = Icons.Outlined.LocationOn,
                     error = if (submitted && !locationOk) "Please enter a location" else null
+                )
+
+                // Fills the location in from the device
+                AutoLocationField(
+                    location = location,
+                    onLocationChange = { location = it },
+                    onPicked = { },
+                    autoStart = false
                 )
 
                 FormLabel("Hospital / Clinic (optional)")
                 FormTextField(
                     value = hospital,
                     onValueChange = { hospital = it },
-                    placeholder = "e.g. Dalaguete District Hospital"
+                    placeholder = "e.g. Cebu General Hospital"
                 )
 
                 FormLabel("Contact Number")
