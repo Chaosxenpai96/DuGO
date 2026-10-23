@@ -1,0 +1,227 @@
+// mao ni ang algo butang sa home/donor
+
+const val MAX_RADIUS_KM = 20.0
+
+/** Haversine: straight-line distance in km between two coordinates. */
+fun distanceKm(lat1: Double, lng1: Double, lat2: Double, lng2: Double): Double {
+    val r = 6371.0
+    val dLat = Math.toRadians(lat2 - lat1)
+    val dLng = Math.toRadians(lng2 - lng1)
+    val a = Math.sin(dLat / 2).let { it * it } +
+            Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2)) *
+            Math.sin(dLng / 2).let { it * it }
+    return 2 * r * Math.asin(Math.sqrt(a))
+}
+
+data class DonorMatch(val donor: Donor, val distanceKm: Double)
+
+/**
+ * Keeps donors with the same blood type (null = any type) that are within
+ * radiusKm (capped at 20 km) of the origin, sorted nearest first.
+ */
+fun findNearestDonors(
+    donors: List<Donor>,
+    bloodType: String?,
+    originLat: Double,
+    originLng: Double,
+    radiusKm: Double
+): List<DonorMatch> {
+    val limit = radiusKm.coerceAtMost(MAX_RADIUS_KM)
+    return donors
+        .asSequence()
+        .filter { bloodType == null || it.bloodType == bloodType }
+        .map { DonorMatch(it, distanceKm(originLat, originLng, it.lat, it.lng)) }
+        .filter { it.distanceKm <= limit }
+        .sortedBy { it.distanceKm }
+        .toList()
+}
+
+
+
+// import sa homescreenmap
+
+
+import android.annotation.SuppressLint
+import android.content.Context
+import android.location.LocationManager
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
+import androidx.compose.runtime.LaunchedEffect
+import com.google.maps.android.compose.Circle
+import kotlin.math.ln
+
+
+
+// helper function homescreen map japon butang babaw sa @composable fun homescreenmap
+
+
+@SuppressLint("MissingPermission")
+private fun lastKnownLocation(context: Context): Pair<Double, Double>? {
+    val lm = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return null
+    return runCatching {
+        lm.getProviders(true)
+            .mapNotNull { lm.getLastKnownLocation(it) }
+            .maxByOrNull { it.time }
+            ?.let { it.latitude to it.longitude }
+    }.getOrNull()
+}
+
+
+// New state. Add under var showAll by remember { mutableStateOf(false) }:
+
+    var radiusKm by remember { mutableStateOf(MAX_RADIUS_KM.toFloat()) }
+    var origin by remember { mutableStateOf(DALAGUETE_LAT to DALAGUETE_LNG) }
+
+
+//Then add this right after the val askLocation = { ... } block:
+
+
+    // Use the phone's GPS if it's in/near Dalaguete, otherwise fall back to the town center
+    LaunchedEffect(granted) {
+        if (granted) {
+            val gps = lastKnownLocation(context)
+            origin = if (gps != null &&
+                distanceKm(gps.first, gps.second, DALAGUETE_LAT, DALAGUETE_LNG) <= 30.0
+            ) gps else DALAGUETE_LAT to DALAGUETE_LNG
+        }
+    }
+
+//Replace the whole val visible = remember(...) { ... } block with:
+
+    val visible = remember(donors, query, bloodFilter, areaFilter, dismissed, radiusKm, origin) {
+        val type = if (bloodFilter == ALL_TYPES) null else bloodFilter
+        findNearestDonors(donors, type, origin.first, origin.second, radiusKm.toDouble())
+            .map { it.donor }
+            .filter { it.id !in dismissed }
+            .filter { areaFilter == ALL_AREAS || it.area == areaFilter }
+            .filter {
+                query.isBlank() ||
+                        it.area.contains(query, ignoreCase = true) ||
+                        it.name.contains(query, ignoreCase = true)
+            }
+    }
+
+
+//slider and “Find nearest” button. Insert between the area FilterDropdown(...) and if (!granted) {:
+
+            Column {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Distance", color = Ink, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        "Within ${radiusKm.toInt()} km",
+                        color = Brand, fontSize = 13.sp, fontWeight = FontWeight.Bold
+                    )
+                }
+                Slider(
+                    value = radiusKm,
+                    onValueChange = { radiusKm = it; showAll = false },
+                    onValueChangeFinished = {
+                        // zoom the map so the whole radius is visible
+                        val zoom = (14.6 - ln(radiusKm.toDouble()) / ln(2.0) * 0.95).toFloat()
+                        scope.launch {
+                            cameraPositionState.animate(
+                                CameraUpdateFactory.newLatLngZoom(LatLng(origin.first, origin.second), zoom)
+                            )
+                        }
+                    },
+                    valueRange = 1f..MAX_RADIUS_KM.toFloat(),
+                    steps = 18, // 1, 2, 3 ... 20 km
+                    colors = SliderDefaults.colors(
+                        thumbColor = Brand,
+                        activeTrackColor = Brand,
+                        inactiveTrackColor = Line
+                    )
+                )
+            }
+
+            Button(
+                onClick = {
+                    val nearest = visible.firstOrNull()
+                    when {
+                        bloodFilter == ALL_TYPES ->
+                            Toast.makeText(context, "Pick a blood type first", Toast.LENGTH_SHORT).show()
+                        nearest == null ->
+                            Toast.makeText(
+                                context,
+                                "No $bloodFilter donor within ${radiusKm.toInt()} km",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        else -> {
+                            selectedId = nearest.id
+                            showAll = false
+                            scope.launch {
+                                cameraPositionState.animate(
+                                    CameraUpdateFactory.newLatLngZoom(LatLng(nearest.lat, nearest.lng), 14f)
+                                )
+                            }
+                        }
+                    }
+                },
+                modifier = Modifier.fillMaxWidth().height(48.dp),
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEE1D2B), contentColor = Color.White)
+            ) {
+                Icon(Icons.Outlined.Search, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    "Find nearest ${if (bloodFilter == ALL_TYPES) "donor" else "$bloodFilter donor"}",
+                    fontWeight = FontWeight.Bold, fontSize = 14.sp
+                )
+            }
+
+
+//Distance on the card, plus the sheet subtitle.In DonorCard(...), change ning code:
+
+// from kani distanceKm = donor.distanceKmFrom(DALAGUETE_LAT, DALAGUETE_LNG),  to kani -> distanceKm = distanceKm(origin.first, origin.second, donor.lat, donor.lng),
+
+
+//And change "${visible.size} available in $areaName" to:
+
+"${visible.size} within ${radiusKm.toInt()} km • $areaName"
+
+//. Draw the radius circle on the map. In the DonorMap( call add:
+
+                originLat = origin.first,
+                originLng = origin.second,
+                radiusKm = radiusKm.toDouble(),
+
+//In private fun DonorMap( add these parameters (after myLocationEnabled):
+
+    originLat: Double,
+    originLng: Double,
+    radiusKm: Double,
+
+//Then, inside GoogleMap(...) { ... }, add this as the first line, before donors.forEach
+
+        Circle(
+            center = LatLng(originLat, originLng),
+            radius = radiusKm * 1000.0,
+            strokeColor = Color(0xFFD90429),
+            strokeWidth = 3f,
+            fillColor = Color(0x1AD90429)
+        )
+
+//MainActivity.kt: replace the onMessageDonor = { ... } lambda with this:
+
+                        onMessageDonor = { donor ->
+                            val intent = Intent(Intent.ACTION_SENDTO, "smsto:${donor.phone}".toUri()).apply {
+                                putExtra(
+                                    "sms_body",
+                                    "Hi ${donor.name}, I found you on DuGO. I'm looking for ${donor.bloodType} blood. Can you help?"
+                                )
+                            }
+                            runCatching { startActivity(intent) }.onFailure {
+                                Toast.makeText(this, "No messaging app found", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+
+
+//import android.content.Intent
+//import androidx.core.net.toUri add ni na imports sa mainactivity
+
+
+// AndroidManifest.xml: the app asks for coarse location but only declares fine. Add this under the existing permission line:
+
+<uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
