@@ -1,1 +1,3 @@
 /build
+# Firebase config is machine-specific; download it from the Firebase console.
+/google-services.json

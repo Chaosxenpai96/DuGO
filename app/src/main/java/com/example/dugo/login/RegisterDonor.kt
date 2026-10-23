@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.LocationOn
@@ -41,7 +42,10 @@ data class DonorForm(
     val availableAnytime: Boolean,
     val specificDates: String,
     val username: String,
-    val password: String
+    val password: String,
+    /** Device GPS position, used for the donor's map pin. */
+    val latitude: Double? = null,
+    val longitude: Double? = null
 )
 
 private enum class Availability { Anytime, SpecificDates }
@@ -49,7 +53,9 @@ private enum class Availability { Anytime, SpecificDates }
 @Composable
 fun RegisterDonor(
     onBack: () -> Unit = {},
-    onSubmit: (DonorForm) -> Unit = {}
+    onSubmit: (DonorForm) -> Unit = {},
+    errorMessage: String? = null,
+    isSubmitting: Boolean = false
 ) {
     var fullName by remember { mutableStateOf("") }
     var bloodType by remember { mutableStateOf("") }
@@ -61,6 +67,7 @@ fun RegisterDonor(
     var password by remember { mutableStateOf("") }
     var confirmPassword by remember { mutableStateOf("") }
     var submitted by remember { mutableStateOf(false) }
+    var pinLocation by remember { mutableStateOf<Pair<Double, Double>?>(null) }
 
     val nameOk = fullName.isNotBlank()
     val bloodOk = bloodType.isNotEmpty()
@@ -115,6 +122,13 @@ fun RegisterDonor(
                 placeholder = "Cebu City, Cebu",
                 leadingIcon = Icons.Outlined.LocationOn,
                 error = if (submitted && !locationOk) "Please enter your location" else null
+            )
+
+            // Puts the donor's pin on the map, using the device's GPS position
+            AutoLocationField(
+                location = location,
+                onLocationChange = { location = it },
+                onPicked = { pinLocation = it.latitude to it.longitude }
             )
 
             FormLabel("Contact Number")
@@ -175,9 +189,14 @@ fun RegisterDonor(
             Spacer(Modifier.padding(bottom = 16.dp))
         }
 
+        if (errorMessage != null) {
+            FormError(errorMessage, Modifier.padding(horizontal = 16.dp).padding(top = 8.dp))
+        }
+
         FormButton(
-            text = "Create Account",
+            text = if (isSubmitting) "Creating account…" else "Create Account",
             color = Color(0xFFDC4660),
+            enabled = !isSubmitting,
             onClick = {
                 submitted = true
                 if (allValid) {
@@ -190,7 +209,9 @@ fun RegisterDonor(
                             availableAnytime = availability == Availability.Anytime,
                             specificDates = if (availability == Availability.SpecificDates) dates.trim() else "",
                             username = username.trim(),
-                            password = password
+                            password = password,
+                            latitude = pinLocation?.first,
+                            longitude = pinLocation?.second
                         )
                     )
                 }

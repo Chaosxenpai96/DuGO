@@ -38,6 +38,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
@@ -228,10 +229,29 @@ fun BloodTypeDropdown(
     }
 }
 
+/** A problem reported after submitting, such as the username already being taken. */
 @Composable
-fun FormButton(text: String, color: Color, onClick: () -> Unit, modifier: Modifier = Modifier) {
+fun FormError(text: String, modifier: Modifier = Modifier) {
+    Text(
+        text,
+        color = ErrorRed,
+        fontSize = 13.sp,
+        textAlign = TextAlign.Center,
+        modifier = modifier.fillMaxWidth()
+    )
+}
+
+@Composable
+fun FormButton(
+    text: String,
+    color: Color,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true
+) {
     Button(
         onClick = onClick,
+        enabled = enabled,
         modifier = modifier.fillMaxWidth().height(54.dp),
         shape = RoundedCornerShape(16.dp),
         colors = ButtonDefaults.buttonColors(containerColor = color, contentColor = Color.White)

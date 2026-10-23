@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
@@ -39,8 +40,13 @@ private val TextGray = Color(0xFF8A8FA0)
 fun LoginScreen(
     onLogin: (String, String) -> Unit = { _, _ -> },
     onGoogle: () -> Unit = {},
+    onGoogleIdToken: (String) -> Unit = { },
+    onGoogleError: (String) -> Unit = {},
+    onFacebook: () -> Unit = {},
     onForgotPassword: () -> Unit = {},
-    onSignUp: () -> Unit = {}
+    onSignUp: () -> Unit = {},
+    authError: String? = null,
+    isLoading: Boolean = false
 ) {
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
@@ -81,6 +87,18 @@ fun LoginScreen(
             Spacer(Modifier.height(16.dp))
             PasswordField(password, { password = it }, showPassword, { showPassword = !showPassword })
 
+            // Sign-in problem, shown under the form
+            if (authError != null) {
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    authError,
+                    color = Color(0xFFEE1D2B),
+                    fontSize = 12.sp,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+
             ForgotPasswordLink(
                 onClick = onForgotPassword,
                 modifier = Modifier.align(Alignment.End).padding(top = 10.dp, bottom = 22.dp)
@@ -88,14 +106,20 @@ fun LoginScreen(
 
             LoginButton(
                 onClick = { onLogin(email.trim(), password) },
-                enabled = email.isNotBlank() && password.isNotEmpty()
+                enabled = !isLoading && email.isNotBlank() && password.isNotEmpty()
             )
 
             Spacer(Modifier.height(20.dp))
             OrDivider()
             Spacer(Modifier.height(20.dp))
 
-            GoogleButton(onGoogle)
+            GoogleCredentialButton(
+                onGoogleIdToken = onGoogleIdToken,
+                onError = onGoogleError,
+                enabled = !isLoading
+            )
+            Spacer(Modifier.height(12.dp))
+            FacebookButton(onFacebook, enabled = !isLoading)
 
             Row(Modifier.padding(top = 24.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("Don't have an account?", fontSize = 12.sp, color = TextGray)

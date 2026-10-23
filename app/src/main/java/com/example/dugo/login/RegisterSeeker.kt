@@ -8,10 +8,13 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.LocationOn
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -19,8 +22,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 
 data class SeekerForm(
     val fullName: String,
@@ -29,13 +34,18 @@ data class SeekerForm(
     val contactNumber: String,
     val notes: String,
     val username: String,
-    val password: String
+    val password: String,
+    /** Device GPS position, used for the seeker's map pin. */
+    val latitude: Double? = null,
+    val longitude: Double? = null
 )
 
 @Composable
 fun RegisterSeeker(
     onBack: () -> Unit = {},
-    onSubmit: (SeekerForm) -> Unit = {}
+    onSubmit: (SeekerForm) -> Unit = {},
+    errorMessage: String? = null,
+    isSubmitting: Boolean = false
 ) {
     var fullName by remember { mutableStateOf("") }
     var bloodType by remember { mutableStateOf("") }
@@ -46,6 +56,7 @@ fun RegisterSeeker(
     var password by remember { mutableStateOf("") }
     var confirmPassword by remember { mutableStateOf("") }
     var submitted by remember { mutableStateOf(false) }
+    var pinLocation by remember { mutableStateOf<Pair<Double, Double>?>(null) }
 
     val nameOk = fullName.isNotBlank()
     val bloodOk = bloodType.isNotEmpty()
@@ -101,6 +112,13 @@ fun RegisterSeeker(
                 error = if (submitted && !locationOk) "Please enter your location or hospital" else null
             )
 
+            // Puts the seeker's pin on the map, using the device's GPS position
+            AutoLocationField(
+                location = location,
+                onLocationChange = { location = it },
+                onPicked = { pinLocation = it.latitude to it.longitude }
+            )
+
             FormLabel("Contact Number")
             FormTextField(
                 value = contact,
@@ -146,9 +164,14 @@ fun RegisterSeeker(
             Spacer(Modifier.padding(bottom = 16.dp))
         }
 
+        if (errorMessage != null) {
+            FormError(errorMessage, Modifier.padding(horizontal = 16.dp).padding(top = 8.dp))
+        }
+
         FormButton(
-            text = "Create Account",
+            text = if (isSubmitting) "Creating account…" else "Create Account",
             color = Color(0xFFF0002B),
+            enabled = !isSubmitting,
             onClick = {
                 submitted = true
                 if (allValid) {
@@ -160,7 +183,9 @@ fun RegisterSeeker(
                             contactNumber = contact,
                             notes = notes.trim(),
                             username = username.trim(),
-                            password = password
+                            password = password,
+                            latitude = pinLocation?.first,
+                            longitude = pinLocation?.second
                         )
                     )
                 }

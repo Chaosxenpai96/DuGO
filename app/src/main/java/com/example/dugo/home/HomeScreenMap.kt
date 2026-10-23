@@ -1,6 +1,8 @@
 package com.example.dugo.home
 
 import android.Manifest
+import android.annotation.SuppressLint
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
@@ -8,6 +10,7 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.Typeface
+import android.location.LocationManager
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -37,6 +40,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.outlined.Call
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.DateRange
@@ -55,9 +59,13 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
@@ -74,6 +82,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -81,14 +90,22 @@ import androidx.core.graphics.createBitmap
 import androidx.core.graphics.toColorInt
 import androidx.core.net.toUri
 import com.example.dugo.R
+import com.example.dugo.auth.AuthRepository
+import com.example.dugo.location.currentLocation
+import com.example.dugo.location.hasLocationPermission
 import com.example.dugo.login.BLOOD_TYPES
 import com.example.dugo.login.Brand
+import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.Priority
 import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.model.BitmapDescriptor
 import com.google.android.gms.maps.model.BitmapDescriptorFactory
 import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
+import com.google.android.gms.tasks.CancellationTokenSource
+import com.google.android.gms.tasks.Tasks
 import com.google.maps.android.compose.CameraPositionState
+import com.google.maps.android.compose.Circle
 import com.google.maps.android.compose.GoogleMap
 import com.google.maps.android.compose.MapProperties
 import com.google.maps.android.compose.MapUiSettings
@@ -96,20 +113,31 @@ import com.google.maps.android.compose.Marker
 import com.google.maps.android.compose.rememberCameraPositionState
 import com.google.maps.android.compose.rememberMarkerState
 import kotlin.math.acos
-import kotlin.math.cos
+import kotlin.math.ln
 import kotlin.math.sin
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlin.math.cos
 
 private val Ink = Color(0xFF1B2230)
 private val Gray = Color(0xFF8A8F99)
 private val Line = Color(0xFFE7E9EE)
 private val Green = Color(0xFF2E9E6B)
 private const val ALL_TYPES = "All blood types"
-private const val ALL_AREAS = "All Dalaguete"
+private const val ALL_AREAS = "All areas"
 
 private const val TOWN_ZOOM = 12f
 private const val AREA_ZOOM = 14f
 
+/** How far the donor search reaches. The map and the settings screen share this. */
+const val MAX_RADIUS_KM = 100
+
+/** ID of the signed-in user's own pin, which the sample donors (1-5) never use. */
+private const val SELF_DONOR_ID = -1
+
+private fun zoomForRadius(radiusKm: Double): Float =
+    (14.6 - ln(radiusKm) / ln(2.0) * 0.95).toFloat()
 enum class HomeTab(val label: String, val icon: ImageVector) {
     Map("Map", Icons.Outlined.Place),
     Requests("Requests", Icons.Outlined.DateRange),
@@ -136,20 +164,53 @@ fun HomeScreenMap(
     var dismissed by remember { mutableStateOf(setOf<Int>()) }
     var selectedId by remember { mutableStateOf<Int?>(null) }
     var showAll by remember { mutableStateOf(false) }
+    var radiusKm by remember {
+        val saved = AppSettings.prefs(context)
+            .getFloat(AppSettings.DEFAULT_RADIUS_KM, AppSettings.DEFAULT_RADIUS_KM_VALUE)
+        mutableStateOf(saved.coerceIn(1f, MAX_RADIUS_KM.toFloat()))
+    }
+    var filtersMinimized by remember { mutableStateOf(false) }
+    var sheetMinimized by remember { mutableStateOf(false) }
+    var usingMyLocation by remember { mutableStateOf(false) }
 
-    // Map camera starts focused on Dalaguete
+    // Real donors who have signed up and saved their position
+    var liveDonors by remember { mutableStateOf<List<Donor>>(emptyList()) }
+
+    DisposableEffect(Unit) {
+        val registration = DonorRepository.listenDonors(
+            onChange = { liveDonors = it },
+            onError = { /* the sample donors stay on the map */ }
+        )
+        onDispose { registration.remove() }
+    }
+
+    // The signed-in user's pin. Its position is the device's GPS fix; the saved
+    // profile position is used until the first fix arrives.
+    val profile = UserSession.profile
+    var myGps by remember {
+        mutableStateOf(
+            profile.latitude?.let { lat ->
+                profile.longitude?.let { lng -> lat to lng }
+            }
+        )
+    }
+    val isDonor = profile.role == "Blood Donor"
+
+    // Moves the user's own pin and remembers the position for next time
+    fun useOwnPosition(gps: Pair<Double, Double>) {
+        myGps = gps
+        AuthRepository.saveLocation(gps.first, gps.second)
+    }
+
+    // Map camera starts on the user's last known position, or the default centre
     val cameraPositionState = rememberCameraPositionState {
-        position = CameraPosition.fromLatLngZoom(LatLng(DALAGUETE_LAT, DALAGUETE_LNG), TOWN_ZOOM)
+        position = CameraPosition.fromLatLngZoom(LatLng(DEFAULT_LAT, DEFAULT_LNG), TOWN_ZOOM)
     }
 
     // Location permission
-    fun hasLocationPermission(): Boolean =
-        ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) ==
-                PackageManager.PERMISSION_GRANTED ||
-                ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) ==
-                PackageManager.PERMISSION_GRANTED
+    fun locationGranted(): Boolean = hasLocationPermission(context)
 
-    var granted by remember { mutableStateOf(hasLocationPermission()) }
+    var granted by remember { mutableStateOf(locationGranted()) }
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { result ->
@@ -165,20 +226,98 @@ fun HomeScreenMap(
         )
     }
 
-    val visible = remember(donors, query, bloodFilter, areaFilter, dismissed) {
-        donors
+    var origin by remember { mutableStateOf(DEFAULT_LAT to DEFAULT_LNG) }
+
+    // Ask for location permission the first time the map opens
+    LaunchedEffect(Unit) {
+        if (!granted) askLocation()
+    }
+
+    // When area filter changes, shift origin to that area's centre
+    LaunchedEffect(areaFilter) {
+        val area = CEBU_REGIONS.firstOrNull { it.name == areaFilter }
+        if (area != null) {
+            origin = area.lat to area.lng
+            usingMyLocation = false
+        }
+    }
+
+    // Center the map on the user's current location once permission is granted
+    LaunchedEffect(granted) {
+        if (granted) {
+            val gps = currentLocation(context) ?: return@LaunchedEffect
+            origin = gps
+            usingMyLocation = true
+            useOwnPosition(gps)
+            cameraPositionState.animate(
+                CameraUpdateFactory.newLatLngZoom(LatLng(gps.first, gps.second), TOWN_ZOOM)
+            )
+        }
+    }
+
+    // "Use my location" button: fetch a fresh fix and fly the camera there
+    val focusMyLocation: () -> Unit = {
+        if (!granted) {
+            askLocation()
+        } else {
+            scope.launch {
+                val gps = currentLocation(context)
+                if (gps != null) {
+                    origin = gps
+                    usingMyLocation = true
+                    useOwnPosition(gps)
+                    cameraPositionState.animate(
+                        CameraUpdateFactory.newLatLngZoom(LatLng(gps.first, gps.second), TOWN_ZOOM)
+                    )
+                } else {
+                    Toast.makeText(context, "Couldn't get your location", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    // The signed-in donor's pin, shown alongside the sample donors
+    val selfPin = myGps?.takeIf { isDonor }?.let { (lat, lng) ->
+        Donor(
+            id = SELF_DONOR_ID,
+            name = profile.fullName,
+            bloodType = profile.bloodType,
+            availableToday = profile.availableToday,
+            area = profile.location.substringBefore(',').trim(),
+            phone = profile.contactNumber,
+            lat = lat,
+            lng = lng,
+            isSelf = true,
+            region = regionForLocation(profile.location)
+        )
+    }
+    val allDonors = remember(donors, liveDonors, selfPin) {
+        val myUid = AuthRepository.currentUser?.uid
+        // The signed-in donor has their own pin, so drop their other copy
+        val list = donors + liveDonors.filter { it.uid != myUid }
+        if (selfPin != null) list + selfPin else list
+    }
+
+    val visible = remember(allDonors, query, bloodFilter, areaFilter, dismissed, radiusKm, origin) {
+        val type = if (bloodFilter == ALL_TYPES) null else bloodFilter
+        findNearestDonors(allDonors, type, origin.first, origin.second, radiusKm.toDouble())
+            .map { it.donor }
             .filter { it.id !in dismissed }
-            .filter { bloodFilter == ALL_TYPES || it.bloodType == bloodFilter }
-            .filter { areaFilter == ALL_AREAS || it.area == areaFilter }
+            // The profile's location text may not match a barangay name, so the
+            // donor's own pin is never hidden by the area filter
+            .filter { areaFilter == ALL_AREAS || it.region == areaFilter || it.isSelf }
             .filter {
                 query.isBlank() ||
                         it.area.contains(query, ignoreCase = true) ||
                         it.name.contains(query, ignoreCase = true)
             }
-            .sortedBy { it.distanceKmFrom(DALAGUETE_LAT, DALAGUETE_LNG) }
     }
     val selected = visible.firstOrNull { it.id == selectedId } ?: visible.firstOrNull()
-    val areaName = if (areaFilter == ALL_AREAS) "Dalaguete" else areaFilter
+    val areaName = when {
+        areaFilter != ALL_AREAS -> areaFilter
+        usingMyLocation -> "your area"
+        else -> "Cebu"
+    }
 
     Column(
         Modifier
@@ -186,16 +325,23 @@ fun HomeScreenMap(
             .background(Color.White)
             .statusBarsPadding()
     ) {
-        HomeHeader(roleLabel, onNotifications, onProfile)
+        HomeHeader(roleLabel, usingMyLocation, onNotifications, onProfile)
 
-        Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        MinimizeRow(
+            title = "Filter & location",
+            minimized = filtersMinimized,
+            onToggle = { filtersMinimized = !filtersMinimized },
+            modifier = Modifier.padding(horizontal = 16.dp)
+        )
+
+        if (!filtersMinimized) Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             OutlinedTextField(
                 value = query,
                 onValueChange = { query = it },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
                 shape = RoundedCornerShape(16.dp),
-                placeholder = { Text("Search location in Dalaguete", color = Gray, fontSize = 14.sp) },
+                placeholder = { Text("Search area or donor name", color = Gray, fontSize = 14.sp) },
                 leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null, tint = Gray) },
                 trailingIcon = {
                     Box(
@@ -204,7 +350,7 @@ fun HomeScreenMap(
                             .size(36.dp)
                             .clip(RoundedCornerShape(10.dp))
                             .background(Color.White)
-                            .clickable { askLocation() },
+                            .clickable { focusMyLocation() },
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(Icons.Outlined.LocationOn, contentDescription = "Use my location", tint = Brand)
@@ -224,22 +370,85 @@ fun HomeScreenMap(
                 onSelected = { bloodFilter = it; showAll = false }
             )
             FilterDropdown(
-                options = listOf(ALL_AREAS) + DALAGUETE_AREAS.map { it.name },
+                options = listOf(ALL_AREAS) + CEBU_REGIONS.map { it.name },
                 selected = areaFilter,
                 leadingIcon = Icons.Outlined.LocationOn,
                 onSelected = { choice ->
                     areaFilter = choice
                     showAll = false
                     // Fly the map to the chosen area
-                    val area = DALAGUETE_AREAS.firstOrNull { it.name == choice }
+                    val area = CEBU_REGIONS.firstOrNull { it.name == choice }
                     val update = if (area != null) {
                         CameraUpdateFactory.newLatLngZoom(LatLng(area.lat, area.lng), AREA_ZOOM)
                     } else {
-                        CameraUpdateFactory.newLatLngZoom(LatLng(DALAGUETE_LAT, DALAGUETE_LNG), TOWN_ZOOM)
+                        CameraUpdateFactory.newLatLngZoom(LatLng(DEFAULT_LAT, DEFAULT_LNG), TOWN_ZOOM)
                     }
                     scope.launch { cameraPositionState.animate(update) }
                 }
             )
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Radius", color = Ink, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.weight(1f))
+                Text("${radiusKm.toInt()} km", color = Brand, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            }
+            Slider(
+                value = radiusKm,
+                onValueChange = { radiusKm = it; showAll = false },
+                onValueChangeFinished = {
+                    // Zoom the map so the whole radius is visible
+                    scope.launch {
+                        cameraPositionState.animate(
+                            CameraUpdateFactory.newLatLngZoom(
+                                LatLng(origin.first, origin.second),
+                                zoomForRadius(radiusKm.toDouble())
+                            )
+                        )
+                    }
+                },
+                valueRange = 1f..MAX_RADIUS_KM.toFloat(),
+                steps = 19, // 1, 2, 3 ... 100 km
+                colors = SliderDefaults.colors(
+                    thumbColor = Brand,
+                    activeTrackColor = Brand,
+                    inactiveTrackColor = Line
+                )
+            )
+
+            Button(
+                onClick = {
+                    val nearest = visible.firstOrNull()
+                    when {
+                        bloodFilter == ALL_TYPES ->
+                            Toast.makeText(context, "Pick a blood type first", Toast.LENGTH_SHORT).show()
+                        nearest == null ->
+                            Toast.makeText(
+                                context,
+                                "No $bloodFilter donor within ${radiusKm.toInt()} km",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        else -> {
+                            selectedId = nearest.id
+                            showAll = false
+                            scope.launch {
+                                cameraPositionState.animate(
+                                    CameraUpdateFactory.newLatLngZoom(LatLng(nearest.lat, nearest.lng), AREA_ZOOM)
+                                )
+                            }
+                        }
+                    }
+                },
+                modifier = Modifier.fillMaxWidth().height(48.dp),
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEE1D2B), contentColor = Color.White)
+            ) {
+                Icon(Icons.Outlined.Search, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    "Find nearest ${if (bloodFilter == ALL_TYPES) "donor" else "$bloodFilter donor"}",
+                    fontWeight = FontWeight.Bold, fontSize = 14.sp
+                )
+            }
 
             if (!granted) {
                 Row(
@@ -275,6 +484,7 @@ fun HomeScreenMap(
                 onSelect = { donor ->
                     selectedId = donor.id
                     showAll = false
+                    sheetMinimized = false
                     scope.launch {
                         cameraPositionState.animate(
                             CameraUpdateFactory.newLatLng(LatLng(donor.lat, donor.lng))
@@ -283,6 +493,9 @@ fun HomeScreenMap(
                 },
                 cameraPositionState = cameraPositionState,
                 myLocationEnabled = granted,
+                originLat = origin.first,
+                originLng = origin.second,
+                radiusKm = radiusKm.toDouble(),
                 modifier = Modifier.fillMaxSize()
             )
 
@@ -335,17 +548,28 @@ fun HomeScreenMap(
                                 fontSize = 12.sp, color = Gray
                             )
                         }
-                        Text(
-                            if (showAll) "Show less" else "View all",
-                            color = Brand,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.clickable { showAll = !showAll }
+                        if (!sheetMinimized) {
+                            Text(
+                                if (showAll) "Show less" else "View all",
+                                color = Brand,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.clickable { showAll = !showAll }
+                            )
+                            Spacer(Modifier.width(12.dp))
+                        }
+                        Icon(
+                            if (sheetMinimized) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
+                            contentDescription = if (sheetMinimized) "Expand donor info" else "Minimize donor info",
+                            tint = Ink,
+                            modifier = Modifier.size(24.dp).clickable { sheetMinimized = !sheetMinimized }
                         )
                     }
                     Spacer(Modifier.height(14.dp))
 
-                    if (visible.isEmpty()) {
+                    if (sheetMinimized) {
+                        // collapsed: header only
+                    } else if (visible.isEmpty()) {
                         Text(
                             "No donors match your filters.",
                             color = Gray, fontSize = 14.sp,
@@ -356,7 +580,7 @@ fun HomeScreenMap(
                         shown.forEach { donor ->
                             DonorCard(
                                 donor = donor,
-                                distanceKm = donor.distanceKmFrom(DALAGUETE_LAT, DALAGUETE_LNG),
+                                distanceKm = donor.distanceKmFrom(origin.first, origin.second),
                                 onDismiss = { dismissed = dismissed + donor.id },
                                 onContact = {
                                     runCatching {
@@ -367,7 +591,19 @@ fun HomeScreenMap(
                                         Toast.makeText(context, "No dialer found", Toast.LENGTH_SHORT).show()
                                     }
                                 },
-                                onMessage = { onMessageDonor(donor) }
+                                onMessage = {
+                                    // Sample donors aren't real accounts, so there is
+                                    // nobody to message yet
+                                    if (donor.uid.isBlank()) {
+                                        Toast.makeText(
+                                            context,
+                                            "${donor.name} is a test donor. Sign in with a real account to chat.",
+                                            Toast.LENGTH_LONG
+                                        ).show()
+                                    } else {
+                                        onMessageDonor(donor)
+                                    }
+                                }
                             )
                             Spacer(Modifier.height(12.dp))
                         }
@@ -382,7 +618,32 @@ fun HomeScreenMap(
 }
 
 @Composable
-private fun HomeHeader(roleLabel: String, onNotifications: () -> Unit, onProfile: () -> Unit) {
+private fun MinimizeRow(
+    title: String,
+    minimized: Boolean,
+    onToggle: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier.fillMaxWidth().clickable(onClick = onToggle).padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(title, Modifier.weight(1f), color = Ink, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+        Icon(
+            if (minimized) Icons.Filled.KeyboardArrowDown else Icons.Filled.KeyboardArrowUp,
+            contentDescription = if (minimized) "Expand filters" else "Minimize filters",
+            tint = Ink
+        )
+    }
+}
+
+@Composable
+private fun HomeHeader(
+    roleLabel: String,
+    usingMyLocation: Boolean,
+    onNotifications: () -> Unit,
+    onProfile: () -> Unit
+) {
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -396,7 +657,7 @@ private fun HomeHeader(roleLabel: String, onNotifications: () -> Unit, onProfile
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(roleLabel, color = Brand, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-            Text("Dalaguete, Cebu", color = Gray, fontSize = 12.sp)
+            Text(if (usingMyLocation) "Near your location" else "Cebu, Philippines", color = Gray, fontSize = 12.sp)
         }
         Box(
             Modifier.size(40.dp).clip(CircleShape).background(Color(0xFFF3F4F6)).clickable(onClick = onNotifications),
@@ -462,7 +723,7 @@ private fun FilterDropdown(
     }
 }
 
-/** Real Google Map focused on Dalaguete, with a blood-type pin for each donor. */
+/** Real Google Map centred on the user's position, with a blood-type pin for each donor. */
 @Composable
 private fun DonorMap(
     donors: List<Donor>,
@@ -470,6 +731,9 @@ private fun DonorMap(
     onSelect: (Donor) -> Unit,
     cameraPositionState: CameraPositionState,
     myLocationEnabled: Boolean,
+    originLat: Double,
+    originLng: Double,
+    radiusKm: Double,
     modifier: Modifier = Modifier
 ) {
     val density = LocalDensity.current.density
@@ -487,6 +751,14 @@ private fun DonorMap(
         // Keeps the Google logo and map center clear of the bottom sheet
         contentPadding = PaddingValues(bottom = 220.dp)
     ) {
+        Circle(
+            center = LatLng(originLat, originLng),
+            radius = radiusKm * 1000.0,
+            strokeColor = Brand,
+            strokeWidth = 3f,
+            fillColor = Brand.copy(alpha = 0.1f)
+        )
+
         donors.forEach { donor ->
             key(donor.id) {
                 val isSelected = donor.id == selectedId
@@ -580,7 +852,10 @@ private fun DonorCard(
             }
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
-                Text(donor.name, fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Ink)
+                Text(
+                    if (donor.isSelf) "${donor.name} (You)" else donor.name,
+                    fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Ink
+                )
                 Spacer(Modifier.height(4.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(
@@ -613,6 +888,16 @@ private fun DonorCard(
                         if (donor.availableToday) "Available today" else "Available on request",
                         color = if (donor.availableToday) Green else Gray,
                         fontSize = 12.sp, fontWeight = FontWeight.Medium
+                    )
+                }
+                if (donor.area.isNotBlank()) {
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        donor.area,
+                        color = Gray,
+                        fontSize = 12.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
             }

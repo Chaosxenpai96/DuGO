@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      Facebook Login credentials from the Meta for Developers dashboard.
+      App Settings -> Basic in https://developers.facebook.com/apps/
+
+      The client token is the value on the "Client token" row (Show button),
+      not the OAuth redirect URI. Leave it empty until it is available; the
+      Facebook SDK treats an empty value as "not set".
+    -->
+    <string name="facebook_app_id" translatable="false">1043785078679381</string>
+    <string name="facebook_client_token" translatable="false">5bbef0b53c0bcc12d4bce5d5b182ce41</string>
+</resources>

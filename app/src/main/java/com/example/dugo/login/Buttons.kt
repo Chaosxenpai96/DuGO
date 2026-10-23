@@ -87,3 +87,44 @@ fun GoogleButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
         Text("Continue with Google", fontSize = 13.sp, fontWeight = FontWeight.Bold)
     }
 }
+
+/**
+ * The Google sign-in button that talks to Credential Manager.
+ * Kept separate from [GoogleButton] so the plain button stays available as a fallback.
+ */
+@Composable
+fun GoogleCredentialButton(
+    onGoogleIdToken: (String) -> Unit,
+    onError: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true
+) {
+    com.example.dugo.auth.GoogleSignInButton(
+        modifier = modifier.fillMaxWidth(),
+        enabled = enabled,
+        onGoogleIdToken = onGoogleIdToken,
+        onError = onError
+    )
+}
+
+@Composable
+fun FacebookButton(onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true) {
+    OutlinedButton(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = modifier.fillMaxWidth().height(52.dp),
+        shape = RoundedCornerShape(26.dp),
+        border = BorderStroke(1.dp, Color(0xFF1877F2)),
+        colors = ButtonDefaults.outlinedButtonColors(containerColor = Color.White, contentColor = TextDark)
+    ) {
+        // Simple "f" badge — swap in a real logo later
+        Box(
+            modifier = Modifier.size(20.dp).clip(CircleShape).background(Color(0xFF1877F2)),
+            contentAlignment = Alignment.Center
+        ) {
+            Text("f", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+        }
+        Spacer(Modifier.width(10.dp))
+        Text("Continue with Facebook", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+    }
+}
