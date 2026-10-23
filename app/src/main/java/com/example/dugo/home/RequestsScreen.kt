@@ -112,8 +112,8 @@ fun RequestsScreen(
 
     val filtered = requests.filter { req ->
         req.id !in dismissed &&
-        (filterUrgency == null || req.urgency == filterUrgency) &&
-        (filterBloodType == "All blood types" || req.bloodType == filterBloodType)
+                (filterUrgency == null || req.urgency == filterUrgency) &&
+                (filterBloodType == "All blood types" || req.bloodType == filterBloodType)
     }.sortedWith(compareByDescending<BloodRequest> { it.urgency == UrgencyLevel.Urgent }
         .thenByDescending { it.postedAt })
 
@@ -240,7 +240,7 @@ fun RequestsScreen(
         }
 
         HorizontalDivider(color = Line)
-        BottomNavBar(selectedTab, onTabSelected)
+        AppBottomNav(selectedTab, onTabSelected)
     }
 
     if (showPostDialog) {
@@ -816,33 +816,6 @@ private fun PostRequestDialog(
                             )
                         }
                     }
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun BottomNavBar(selected: HomeTab, onSelect: (HomeTab) -> Unit) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .navigationBarsPadding()
-            .padding(vertical = 8.dp),
-        horizontalArrangement = Arrangement.SpaceAround
-    ) {
-        HomeTab.entries.forEach { tab ->
-            val active = tab == selected
-            Column(
-                Modifier.clickable { onSelect(tab) }.padding(horizontal = 12.dp, vertical = 4.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Icon(tab.icon, contentDescription = tab.label, tint = if (active) Brand else Gray)
-                Text(
-                    tab.label,
-                    fontSize = 11.sp,
-                    fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
-                    color = if (active) Brand else Gray
                 )
             }
         }

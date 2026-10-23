@@ -236,7 +236,7 @@ private fun ConversationListScreen(
         }
 
         HorizontalDivider(color = Line)
-        MessagesBottomNav(selectedTab, onTabSelected)
+        AppBottomNav(selectedTab, onTabSelected)
     }
 }
 
@@ -333,6 +333,11 @@ private fun ChatScreen(conversation: Conversation, onBack: () -> Unit) {
             onError = { loadError = it }
         )
         onDispose { registration.remove() }
+    }
+
+    // Anything that arrives while this chat is open counts as read
+    LaunchedEffect(conversation.id, messages.size) {
+        MessageRepository.markRead(conversation.id)
     }
 
     // Scroll to bottom when messages change
@@ -541,33 +546,6 @@ private fun MessageBubble(msg: Message) {
                     color = if (isMe) Color.White.copy(alpha = 0.7f) else Gray,
                     fontSize = 10.sp,
                     modifier = Modifier.align(Alignment.End)
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun MessagesBottomNav(selected: HomeTab, onSelect: (HomeTab) -> Unit) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .navigationBarsPadding()
-            .padding(vertical = 8.dp),
-        horizontalArrangement = Arrangement.SpaceAround
-    ) {
-        HomeTab.entries.forEach { tab ->
-            val active = tab == selected
-            Column(
-                Modifier.clickable { onSelect(tab) }.padding(horizontal = 12.dp, vertical = 4.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Icon(tab.icon, contentDescription = tab.label, tint = if (active) Brand else Gray)
-                Text(
-                    tab.label,
-                    fontSize = 11.sp,
-                    fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
-                    color = if (active) Brand else Gray
                 )
             }
         }

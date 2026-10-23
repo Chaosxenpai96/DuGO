@@ -613,7 +613,7 @@ fun HomeScreenMap(
         }
 
         HorizontalDivider(color = Line)
-        BottomNav(selectedTab, onTabSelected)
+        AppBottomNav(selectedTab, onTabSelected)
     }
 }
 
@@ -931,33 +931,6 @@ private fun DonorCard(
                 contentAlignment = Alignment.Center
             ) {
                 Icon(Icons.Outlined.Email, contentDescription = "Message", tint = Brand)
-            }
-        }
-    }
-}
-
-@Composable
-private fun BottomNav(selected: HomeTab, onSelect: (HomeTab) -> Unit) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .navigationBarsPadding()
-            .padding(vertical = 8.dp),
-        horizontalArrangement = Arrangement.SpaceAround
-    ) {
-        HomeTab.entries.forEach { tab ->
-            val active = tab == selected
-            Column(
-                Modifier.clickable { onSelect(tab) }.padding(horizontal = 12.dp, vertical = 4.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Icon(tab.icon, contentDescription = tab.label, tint = if (active) Brand else Gray)
-                Text(
-                    tab.label,
-                    fontSize = 11.sp,
-                    fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
-                    color = if (active) Brand else Gray
-                )
             }
         }
     }
