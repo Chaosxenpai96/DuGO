@@ -75,6 +75,29 @@ object RequestRepository {
         }
     }
 
+    /**
+     * Marks a request as fulfilled. Only the poster may do this (see firestore.rules).
+     * Returns null on success, or a message to show the user.
+     */
+    suspend fun markFulfilled(requestId: String): String? =
+        try {
+            // Offline, the update is kept locally and uploaded later, so a timeout is fine.
+            withTimeoutOrNull(POST_TIMEOUT_MS) {
+                requests.document(requestId)
+                    .update(
+                        mapOf(
+                            "fulfilled" to true,
+                            "fulfilledAt" to System.currentTimeMillis()
+                        )
+                    )
+                    .await()
+            }
+            null
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not mark the request as fulfilled", e)
+            friendlyMessage(e)
+        }
+
     private fun toRequest(doc: DocumentSnapshot): BloodRequest? {
         val posterName = doc.getString("posterName") ?: return null
         val bloodType = doc.getString("bloodType") ?: return null
@@ -89,7 +112,8 @@ object RequestRepository {
             urgency = UrgencyLevel.entries.find { it.name == doc.getString("urgency") }
                 ?: UrgencyLevel.Normal,
             contact = doc.getString("contact").orEmpty(),
-            postedAt = doc.getLong("postedAt") ?: 0L
+            postedAt = doc.getLong("postedAt") ?: 0L,
+            fulfilled = doc.getBoolean("fulfilled") ?: false
         )
     }
 

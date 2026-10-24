@@ -19,7 +19,8 @@ data class BloodRequest(
     val notes: String,
     val urgency: UrgencyLevel,
     val contact: String,
-    val postedAt: Long = System.currentTimeMillis()
+    val postedAt: Long = System.currentTimeMillis(),
+    val fulfilled: Boolean = false   // set by the poster with "Mark as Done"
 ) {
     fun timeAgo(): String {
         val diff = System.currentTimeMillis() - postedAt

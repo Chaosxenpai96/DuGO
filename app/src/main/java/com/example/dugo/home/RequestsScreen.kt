@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -26,11 +27,14 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Phone
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.LocationOn
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
@@ -41,6 +45,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -56,10 +61,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.core.net.toUri
+import com.example.dugo.auth.AuthRepository
 import com.example.dugo.login.BLOOD_TYPES
 import com.example.dugo.login.BloodTypeDropdown
 import com.example.dugo.login.Brand
@@ -101,6 +108,9 @@ fun RequestsScreen(
     var showMessageDialog by remember { mutableStateOf(false) }
     var isSendingMessage by remember { mutableStateOf(false) }
     var messageError by remember { mutableStateOf<String?>(null) }
+    var featuredEvent by remember { mutableStateOf<BloodDriveEvent?>(null) }
+    var requestToComplete by remember { mutableStateOf<BloodRequest?>(null) }
+    val myUid = AuthRepository.currentUser?.uid
 
     DisposableEffect(Unit) {
         val registration = RequestRepository.listen(
@@ -110,11 +120,19 @@ fun RequestsScreen(
         onDispose { registration.remove() }
     }
 
+    // Next blood donation drive, shown as the featured banner when there is one
+    DisposableEffect(Unit) {
+        val registration = EventRepository.listenNextDrive { featuredEvent = it }
+        onDispose { registration.remove() }
+    }
+
+    // Open requests first (urgent, then newest); fulfilled ones sink to the bottom
     val filtered = requests.filter { req ->
         req.id !in dismissed &&
-        (filterUrgency == null || req.urgency == filterUrgency) &&
-        (filterBloodType == "All blood types" || req.bloodType == filterBloodType)
-    }.sortedWith(compareByDescending<BloodRequest> { it.urgency == UrgencyLevel.Urgent }
+                (filterUrgency == null || req.urgency == filterUrgency) &&
+                (filterBloodType == "All blood types" || req.bloodType == filterBloodType)
+    }.sortedWith(compareBy<BloodRequest> { it.fulfilled }
+        .thenByDescending { it.urgency == UrgencyLevel.Urgent }
         .thenByDescending { it.postedAt })
 
     Column(
@@ -140,6 +158,12 @@ fun RequestsScreen(
 
         // Feed
         if (filtered.isEmpty()) {
+            featuredEvent?.let { event ->
+                FeaturedEventBanner(
+                    event,
+                    Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp)
+                )
+            }
             Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                 Column(
                     Modifier.padding(horizontal = 32.dp),
@@ -165,18 +189,54 @@ fun RequestsScreen(
                     .padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
+                featuredEvent?.let { FeaturedEventBanner(it) }
+
                 filtered.forEach { req ->
                     RequestCard(
                         request = req,
+                        isOwner = myUid != null && req.posterUid == myUid,
                         onContact = {
                             selectedRequest = req
                             showContactDialog = true
                         },
+                        onMarkDone = { requestToComplete = req },
                         onDismiss = { dismissed = dismissed + req.id }
                     )
                 }
                 Spacer(Modifier.height(4.dp))
             }
+        }
+
+        requestToComplete?.let { request ->
+            AlertDialog(
+                onDismissRequest = { requestToComplete = null },
+                title = { Text("Mark as done?", fontWeight = FontWeight.Bold) },
+                text = {
+                    Text(
+                        "This tells donors the ${request.bloodType} request is fulfilled. " +
+                                "It can't be undone.",
+                        color = Gray
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        requestToComplete = null
+                        scope.launch {
+                            val error = RequestRepository.markFulfilled(request.id)
+                            if (error != null) {
+                                Toast.makeText(context, error, Toast.LENGTH_LONG).show()
+                            }
+                        }
+                    }) {
+                        Text("Mark as done", color = NormalGreen, fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { requestToComplete = null }) {
+                        Text("Cancel", color = Gray)
+                    }
+                }
+            )
         }
 
         if (showContactDialog && selectedRequest != null) {
@@ -240,7 +300,7 @@ fun RequestsScreen(
         }
 
         HorizontalDivider(color = Line)
-        BottomNavBar(selectedTab, onTabSelected)
+        AppBottomNav(selectedTab, onTabSelected)
     }
 
     if (showPostDialog) {
@@ -398,17 +458,28 @@ private fun FilterBar(
 @Composable
 private fun RequestCard(
     request: BloodRequest,
+    isOwner: Boolean,
     onContact: () -> Unit,
+    onMarkDone: () -> Unit,
     onDismiss: () -> Unit
 ) {
     val shape = RoundedCornerShape(20.dp)
     val urgencyColor = if (request.urgency == UrgencyLevel.Urgent) UrgentRed else NormalGreen
+    val done = request.fulfilled
 
     Column(
         Modifier
             .fillMaxWidth()
-            .border(1.5.dp, if (request.urgency == UrgencyLevel.Urgent) UrgentRed.copy(alpha = 0.3f) else Line, shape)
-            .background(Color.White, shape)
+            .border(
+                1.5.dp,
+                when {
+                    done -> NormalGreen.copy(alpha = 0.5f)
+                    request.urgency == UrgencyLevel.Urgent -> UrgentRed.copy(alpha = 0.3f)
+                    else -> Line
+                },
+                shape
+            )
+            .background(if (done) NormalGreen.copy(alpha = 0.08f) else Color.White, shape)
             .padding(16.dp)
     ) {
         // Top row: urgency badge + dismiss
@@ -437,7 +508,18 @@ private fun RequestCard(
                 Text(request.bloodType, color = Brand, fontSize = 11.sp, fontWeight = FontWeight.Bold)
             }
             Spacer(Modifier.weight(1f))
-            Text(request.timeAgo(), color = Gray, fontSize = 11.sp)
+            if (done) {
+                Icon(
+                    Icons.Outlined.Check,
+                    contentDescription = null,
+                    tint = Ink.copy(alpha = 0.7f),
+                    modifier = Modifier.size(14.dp)
+                )
+                Spacer(Modifier.width(3.dp))
+                Text("Resolved", color = Ink.copy(alpha = 0.7f), fontSize = 12.sp)
+            } else {
+                Text(request.timeAgo(), color = Gray, fontSize = 11.sp)
+            }
             Spacer(Modifier.width(10.dp))
             Icon(
                 Icons.Outlined.Close,
@@ -450,7 +532,12 @@ private fun RequestCard(
         Spacer(Modifier.height(10.dp))
 
         // Poster name
-        Text(request.posterName, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Ink)
+        Text(
+            request.posterName,
+            fontSize = 16.sp,
+            fontWeight = FontWeight.Bold,
+            color = if (done) Gray else Ink
+        )
 
         // Hospital / location
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
@@ -471,30 +558,121 @@ private fun RequestCard(
 
         Spacer(Modifier.height(14.dp))
 
-        Row(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Button(
-                onClick = onContact,
-                modifier = Modifier.weight(1f).height(46.dp),
-                shape = RoundedCornerShape(14.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = UrgentRed, contentColor = Color.White)
-            ) {
-                Icon(Icons.Outlined.Phone, contentDescription = null, modifier = Modifier.size(16.dp))
-                Spacer(Modifier.width(8.dp))
-                Text("Call", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+        if (done) {
+            // Fulfilled bar replaces the action buttons
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Row(
+                    Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(NormalGreen)
+                        .padding(horizontal = 28.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Outlined.CheckCircle,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text("Fulfilled", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                }
             }
-            Button(
-                onClick = onContact,
-                modifier = Modifier.weight(1f).height(46.dp),
-                shape = RoundedCornerShape(14.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Ink, contentColor = Color.White)
+        } else {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Icon(Icons.Outlined.Add, contentDescription = "Message", modifier = Modifier.size(16.dp))
-                Spacer(Modifier.width(8.dp))
-                Text("Message", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                Button(
+                    onClick = onContact,
+                    modifier = Modifier.weight(1f).height(46.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    contentPadding = PaddingValues(horizontal = 8.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = UrgentRed, contentColor = Color.White)
+                ) {
+                    Icon(Icons.Outlined.Phone, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Call", fontWeight = FontWeight.Bold, fontSize = 14.sp, maxLines = 1)
+                }
+                Button(
+                    onClick = onContact,
+                    modifier = Modifier.weight(1f).height(46.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    contentPadding = PaddingValues(horizontal = 8.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Ink, contentColor = Color.White)
+                ) {
+                    Icon(Icons.Outlined.Add, contentDescription = "Message", modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Message", fontWeight = FontWeight.Bold, fontSize = 14.sp, maxLines = 1)
+                }
+                // Only the person who posted the request can close it
+                if (isOwner) {
+                    Button(
+                        onClick = onMarkDone,
+                        modifier = Modifier.weight(1.2f).height(46.dp),
+                        shape = RoundedCornerShape(14.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = NormalGreen,
+                            contentColor = Color.White
+                        )
+                    ) {
+                        Text("Mark as Done", fontWeight = FontWeight.Bold, fontSize = 13.sp, maxLines = 1)
+                    }
+                }
             }
+        }
+    }
+}
+
+@Composable
+private fun FeaturedEventBanner(event: BloodDriveEvent, modifier: Modifier = Modifier) {
+    val shape = RoundedCornerShape(20.dp)
+    Column(
+        modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(UrgentRed.copy(alpha = 0.08f))
+            .border(1.dp, UrgentRed.copy(alpha = 0.2f), shape)
+            .padding(16.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Featured Event", color = Ink.copy(alpha = 0.7f), fontSize = 12.sp, modifier = Modifier.weight(1f))
+            Box(
+                Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(if (event.isToday()) UrgentRed else Ink.copy(alpha = 0.08f))
+                    .padding(horizontal = 10.dp, vertical = 4.dp)
+            ) {
+                Text(
+                    if (event.isToday()) "Today" else "Upcoming",
+                    color = if (event.isToday()) Color.White else Ink.copy(alpha = 0.8f),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(event.title, color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(4.dp))
+        Text(
+            buildString {
+                append("Date: ${event.formattedDate()}")
+                if (event.location.isNotBlank()) append("  |  Location: ${event.location}")
+            },
+            color = Ink,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Medium
+        )
+        if (event.description.isNotBlank()) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                event.description,
+                color = Ink.copy(alpha = 0.75f),
+                fontSize = 13.sp,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
         }
     }
 }
@@ -816,33 +994,6 @@ private fun PostRequestDialog(
                             )
                         }
                     }
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun BottomNavBar(selected: HomeTab, onSelect: (HomeTab) -> Unit) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .navigationBarsPadding()
-            .padding(vertical = 8.dp),
-        horizontalArrangement = Arrangement.SpaceAround
-    ) {
-        HomeTab.entries.forEach { tab ->
-            val active = tab == selected
-            Column(
-                Modifier.clickable { onSelect(tab) }.padding(horizontal = 12.dp, vertical = 4.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Icon(tab.icon, contentDescription = tab.label, tint = if (active) Brand else Gray)
-                Text(
-                    tab.label,
-                    fontSize = 11.sp,
-                    fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
-                    color = if (active) Brand else Gray
                 )
             }
         }
