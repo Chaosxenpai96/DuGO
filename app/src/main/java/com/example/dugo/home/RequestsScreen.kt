@@ -109,6 +109,7 @@ fun RequestsScreen(
     var isSendingMessage by remember { mutableStateOf(false) }
     var messageError by remember { mutableStateOf<String?>(null) }
     var featuredEvent by remember { mutableStateOf<BloodDriveEvent?>(null) }
+    var eventStatus by remember { mutableStateOf("waiting for events...") } // TEMP debug
     var requestToComplete by remember { mutableStateOf<BloodRequest?>(null) }
     val myUid = AuthRepository.currentUser?.uid
 
@@ -122,7 +123,7 @@ fun RequestsScreen(
 
     // Next blood donation drive, shown as the featured banner when there is one
     DisposableEffect(Unit) {
-        val registration = EventRepository.listenNextDrive { featuredEvent = it }
+        val registration = EventRepository.listenNextDrive(onStatus = { eventStatus = it }) { featuredEvent = it }
         onDispose { registration.remove() }
     }
 
@@ -155,6 +156,16 @@ fun RequestsScreen(
         )
 
         HorizontalDivider(color = Line)
+
+        // TEMP debug: remove once the banner works
+        if (featuredEvent == null) {
+            Text(
+                "Banner debug: $eventStatus",
+                color = UrgentRed,
+                fontSize = 11.sp,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+            )
+        }
 
         // Feed
         if (filtered.isEmpty()) {

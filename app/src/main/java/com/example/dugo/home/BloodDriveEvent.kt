@@ -42,7 +42,10 @@ object EventRepository {
      * Calls [onChange] with the next drive that is today or later, or null when
      * there isn't one. Remove the returned registration when the screen closes.
      */
-    fun listenNextDrive(onChange: (BloodDriveEvent?) -> Unit): ListenerRegistration {
+    fun listenNextDrive(
+        onStatus: (String) -> Unit = {},   // TEMP debug: why the banner is or isn't showing
+        onChange: (BloodDriveEvent?) -> Unit
+    ): ListenerRegistration {
         val startOfToday = Calendar.getInstance().apply {
             set(Calendar.HOUR_OF_DAY, 0)
             set(Calendar.MINUTE, 0)
@@ -58,10 +61,17 @@ object EventRepository {
                 if (error != null) {
                     // The banner is optional, so a failure just hides it.
                     Log.w(TAG, "Could not load blood drives", error)
+                    onStatus("error: ${error.message}")
                     onChange(null)
                     return@addSnapshotListener
                 }
-                onChange(snapshot?.documents.orEmpty().firstNotNullOfOrNull(::toEvent))
+                val docs = snapshot?.documents.orEmpty()
+                val event = docs.firstNotNullOfOrNull(::toEvent)
+                onStatus(
+                    "upcoming docs=${docs.size}, readable=${if (event != null) 1 else 0}, " +
+                            "fromCache=${snapshot?.metadata?.isFromCache}"
+                )
+                onChange(event)
             }
     }
 
