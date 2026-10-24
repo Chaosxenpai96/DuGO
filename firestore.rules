@@ -1,32 +1,29 @@
 rules_version = '2';
 
-// DuGO's Firestore rules.
+// DuGO's Firestore rules (fixed).
 //
 // Deploy with:
 //   firebase deploy --only firestore:rules
 //
-// The data model:
+// Data model:
 //   users/{uid}                 - a profile
 //   requests/{requestId}        - a blood request
-//   conversations/{id}          - a chat between two people
+//   events/{eventId}            - a blood donation drive (shown as the featured banner)
+//   conversations/{id}          - a chat between two people (id = uidA_uidB)
 //   conversations/{id}/messages/{msgId}
 
 service cloud.firestore {
   match /databases/{database}/documents {
 
     // ---------- profiles ----------
-    // Any signed-in user can read profiles: the map needs to see other people's
-    // name, blood type and position to place their pin. Only the owner changes
-    // their own profile.
     match /users/{uid} {
       allow read: if request.auth != null;
-      allow create, update: if request.auth != null && request.auth.uid == uid;
-      allow delete: if request.auth != null && request.auth.uid == uid;
+      allow create, update, delete: if request.auth != null && request.auth.uid == uid;
     }
 
     // ---------- blood requests ----------
-    // Every signed-in user can read the feed and post a request. Only the person
-    // who posted it can change or remove it.
+    // The poster can update their own request, which is how "Mark as Done"
+    // sets fulfilled = true.
     match /requests/{requestId} {
       allow read: if request.auth != null;
       allow create: if request.auth != null &&
@@ -35,54 +32,57 @@ service cloud.firestore {
                             resource.data.posterUid == request.auth.uid;
     }
 
+    // ---------- blood donation drives ----------
+    // Read-only from the app. Add or edit drives in the Firebase console.
+    // Fields: title (string), date (number, millis), location (string),
+    //         description (string, optional)
+    match /events/{eventId} {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+
     // ---------- conversations ----------
-    // A conversation's id is the two users' uids joined by an underscore, so
-    // both of them work out the same document.
     match /conversations/{conversationId} {
 
-      // Who is in this conversation. On a write this is the incoming data; on a
-      // read it is what is already stored.
-      function participants() {
+      // Membership is read from the document id (uidA_uidB), so it works
+      // even before the conversation document exists.
+      function inConversationId() {
         return request.auth != null &&
-               request.auth.uid in request.resource.data.participantIds;
+               request.auth.uid in conversationId.split('_');
       }
 
-      function storedParticipants() {
-        return request.auth != null &&
-               request.auth.uid in resource.data.participantIds;
-      }
+      // Chat list query (whereArrayContains on participantIds) still works
+      // because stored participants are checked when the document exists.
+      allow read: if request.auth != null &&
+                  (resource == null
+                   ? inConversationId()
+                   : request.auth.uid in resource.data.participantIds);
 
-      // The chat list is found with whereArrayContains on participantIds.
-      // Firestore proves this rule for each document in the result, so a
-      // signed-in user only ever sees the chats they are part of.
-      allow read: if storedParticipants();
+      allow create: if inConversationId() &&
+                    request.auth.uid in request.resource.data.participantIds;
 
-      // A conversation is created when the first message is sent, so the
-      // creator has to be one of the two participants.
-      allow create: if participants();
-
-      // Updating the summary marks it read; only a participant may do that.
-      allow update: if storedParticipants();
+      // Participants may update the summary, but not change who is in the chat.
+      allow update: if inConversationId() &&
+                    request.auth.uid in resource.data.participantIds &&
+                    request.resource.data.participantIds == resource.data.participantIds;
 
       allow delete: if false;
 
       // ---------- messages ----------
       match /messages/{messageId} {
-        function chatParticipants() {
-          return request.auth != null && request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.participantIds;
-        }
 
-        allow read: if chatParticipants();
+        allow read: if inConversationId();
 
-        allow create: if request.auth != null &&
-                      request.resource.data.senderUid == request.auth.uid &&
-                      chatParticipants();
+        allow create: if inConversationId() &&
+                      request.resource.data.senderUid == request.auth.uid;
 
-        // Only the sender can edit their own message. The receiver also needs
-        // to update it to mark it as read.
-        allow update: if chatParticipants() &&
-                      (request.resource.data.senderUid == request.auth.uid ||
-                       resource.data.senderUid == request.auth.uid);
+        // Sender can edit their own message. The other participant can only
+        // change the read fields. Rename 'read'/'readAt' to match your model.
+        allow update: if inConversationId() &&
+                      request.resource.data.senderUid == resource.data.senderUid &&
+                      (resource.data.senderUid == request.auth.uid ||
+                       request.resource.data.diff(resource.data).affectedKeys()
+                         .hasOnly(['read', 'readAt']));
 
         allow delete: if request.auth != null &&
                       resource.data.senderUid == request.auth.uid;
