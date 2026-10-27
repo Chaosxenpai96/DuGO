@@ -281,7 +281,7 @@ fun ProfileScreen(
         }
 
         HorizontalDivider(color = Line)
-        ProfileBottomNav(selectedTab, onTabSelected)
+        AppBottomNav(selectedTab, onTabSelected)
     }
 
     // Edit profile dialog placeholder
@@ -349,32 +349,6 @@ private fun SettingsRow(icon: ImageVector, label: String, onClick: () -> Unit) {
     }
 }
 
-@Composable
-private fun ProfileBottomNav(selected: HomeTab, onSelect: (HomeTab) -> Unit) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .navigationBarsPadding()
-            .padding(vertical = 8.dp),
-        horizontalArrangement = Arrangement.SpaceAround
-    ) {
-        HomeTab.entries.forEach { tab ->
-            val active = tab == selected
-            Column(
-                Modifier.clickable { onSelect(tab) }.padding(horizontal = 12.dp, vertical = 4.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Icon(tab.icon, contentDescription = tab.label, tint = if (active) Brand else Gray)
-                Text(
-                    tab.label,
-                    fontSize = 11.sp,
-                    fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
-                    color = if (active) Brand else Gray
-                )
-            }
-        }
-    }
-}
 
 @Composable
 private fun EditProfileDialog(

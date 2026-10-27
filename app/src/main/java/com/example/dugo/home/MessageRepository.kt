@@ -50,6 +50,13 @@ object MessageRepository {
                 onChange(snapshot?.documents.orEmpty().mapNotNull(::toConversation))
             }
 
+    /** Total unread messages across all of the signed-in user's chats. */
+    fun listenUnreadTotal(onChange: (Int) -> Unit): ListenerRegistration =
+        listenConversations(
+            onChange = { list -> onChange(list.sumOf { it.unreadCount }) },
+            onError = { onChange(0) }
+        )
+
     /** Watches the messages in one conversation, newest last. */
     fun listenMessages(
         conversationId: String,

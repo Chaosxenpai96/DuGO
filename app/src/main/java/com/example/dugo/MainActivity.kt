@@ -127,7 +127,7 @@ class MainActivity : ComponentActivity() {
                 if (facebookToken != null) {
                     pendingFacebookToken.value = null
                     isAuthLoading = true
-                    scope.launch {
+                    scope.  launch {
                         when (val result = AuthRepository.signInWithFacebook(facebookToken)) {
                             is AuthResult.Success -> {
                                 afterSignIn()
